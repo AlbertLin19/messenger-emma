@@ -109,6 +109,8 @@ class StageTwo(MessengerEnv):
         # try to add each entity one by one, if it's not there move on.
         if 'enemy.1' in vgdl_obs:
             entity_locs.add(self.game.enemy, Position(*vgdl_obs['enemy.1']['position']))
+        else:
+            entity_locs.entity_count += 1
         if 'message.1' in vgdl_obs:
             entity_locs.add(self.game.message, Position(*vgdl_obs['message.1']['position']))
         else:
@@ -117,6 +119,8 @@ class StageTwo(MessengerEnv):
             entity_locs.entity_count += 1
         if 'goal.1' in vgdl_obs:
             entity_locs.add(self.game.goal, Position(*vgdl_obs['goal.1']['position']))
+        else:
+            entity_locs.entity_count += 1
 
         if 'no_message.1' in vgdl_obs:
             '''
@@ -151,11 +155,13 @@ class StageTwo(MessengerEnv):
         properly reset the environment. kwargs go to get_document().
         '''
 
-        self.game = random.choice(self.all_games) # (e.g. enemy-alien, message-knight, goal - bear)
+        self.game_id = random.randrange(len(self.all_games))
+        self.game = self.all_games[self.game_id] # (e.g. enemy-alien, message-knight, goal - bear)
 
         # choose the game variant (e.g. enmey-chasing, message-fleeing, goal-static)
         # and initial starting location of the entities.
-        variant = random.choice(self.game_variants)
+        self.variant_id = random.randrange(len(self.game_variants))
+        variant = self.game_variants[self.variant_id]
         init_state = random.choice(self.init_states) # inital state file
 
         # args that will go into VGDL Env.
