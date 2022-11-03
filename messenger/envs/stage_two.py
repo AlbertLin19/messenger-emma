@@ -38,7 +38,7 @@ class StageTwo(MessengerEnv):
     into entities (e.g. alien, knight, mage).
     '''
 
-    def __init__(self, split:str, shuffle_obs=True):
+    def __init__(self, split:str, shuffle_obs=True, fix_game_order=False):
         super().__init__()
         self.shuffle_obs = shuffle_obs # shuffle the entity layers
 
@@ -82,6 +82,10 @@ class StageTwo(MessengerEnv):
         # entities tracked by VGDLEnv
         self.notable_sprites = ["enemy", "message", "goal", "no_message", "with_message"]
         self.env = None # the VGDLEnv
+
+        self.fix_game_order = fix_game_order
+        self.game_id = 0
+        self.variant_id = 0
 
     def _get_variant(self, variant_file:Path) -> GameVariant:
         '''
@@ -155,12 +159,14 @@ class StageTwo(MessengerEnv):
         properly reset the environment. kwargs go to get_document().
         '''
 
-        self.game_id = random.randrange(len(self.all_games))
+        if not self.fix_game_order:
+            self.game_id = random.randrange(len(self.all_games))
         self.game = self.all_games[self.game_id] # (e.g. enemy-alien, message-knight, goal - bear)
 
         # choose the game variant (e.g. enmey-chasing, message-fleeing, goal-static)
         # and initial starting location of the entities.
-        self.variant_id = random.randrange(len(self.game_variants))
+        if not self.fix_game_order:
+            self.variant_id = random.randrange(len(self.game_variants))
         variant = self.game_variants[self.variant_id]
         init_state = random.choice(self.init_states) # inital state file
 
@@ -187,6 +193,14 @@ class StageTwo(MessengerEnv):
 
         if self.shuffle_obs:
             random.shuffle(manual)
+
+        if self.fix_game_order:
+            self.game_id += 1
+            if self.game_id >= len(self.all_games):
+                self.game_id = 0
+                self.variant_id += 1
+                if self.variant_id >= len(self.game_variants):
+                    self.variant_id = 0
             
         return self._convert_obs(vgdl_obs), manual
 
