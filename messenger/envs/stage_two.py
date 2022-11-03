@@ -162,12 +162,14 @@ class StageTwo(MessengerEnv):
         if not self.fix_game_order:
             self.game_id = random.randrange(len(self.all_games))
         self.game = self.all_games[self.game_id] # (e.g. enemy-alien, message-knight, goal - bear)
+        current_game_id = self.game_id
 
         # choose the game variant (e.g. enmey-chasing, message-fleeing, goal-static)
         # and initial starting location of the entities.
         if not self.fix_game_order:
             self.variant_id = random.randrange(len(self.game_variants))
         variant = self.game_variants[self.variant_id]
+        current_variant_id = self.variant_id
         init_state = random.choice(self.init_states) # inital state file
 
         # args that will go into VGDL Env.
@@ -202,7 +204,7 @@ class StageTwo(MessengerEnv):
                 if self.variant_id >= len(self.game_variants):
                     self.variant_id = 0
             
-        return self._convert_obs(vgdl_obs), manual
+        return self._convert_obs(vgdl_obs), manual, current_game_id, current_variant_id
 
     def step(self, action):
         vgdl_obs, reward, done, info = self.env.step(action)
