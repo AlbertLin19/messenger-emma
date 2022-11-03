@@ -55,6 +55,14 @@ register(
 )
 
 register(
+    id = "msgr-train-all-v2",
+    entry_point="messenger.envs:StageTwo",
+    kwargs = dict(
+        split="train_all",
+    )
+)
+
+register(
     id = "msgr-train-sc-v2",
     entry_point="messenger.envs:StageTwo",
     kwargs = dict(

@@ -51,6 +51,9 @@ class StageTwo(MessengerEnv):
         elif "train" in split and "sc" in split: # single-combination games
             game_split = "train_single_comb"
             text_json_path = this_folder.joinpath("texts", "text_train.json")
+        elif "train" in split and "all" in split: # all games
+            game_split = "train_all"
+            text_json_path = this_folder.joinpath("texts", "text_train.json")
         elif "val" in split:
             game_split = "val"
             text_json_path = this_folder.joinpath("texts", "text_val.json")
