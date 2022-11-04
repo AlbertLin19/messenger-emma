@@ -89,6 +89,7 @@ class StageTwo(MessengerEnv):
         self.fix_game_order = fix_game_order
         self.game_id = 0
         self.variant_id = 0
+        self.init_state_id = 0
 
     def _get_variant(self, variant_file:Path) -> GameVariant:
         '''
@@ -173,7 +174,11 @@ class StageTwo(MessengerEnv):
             self.variant_id = random.randrange(len(self.game_variants))
         variant = self.game_variants[self.variant_id]
         current_variant_id = self.variant_id
-        init_state = random.choice(self.init_states) # inital state file
+
+        if not self.fix_game_order:
+            self.init_state_id = random.randrange(len(self.init_states))
+        init_state = self.init_states[self.init_state_id] # inital state file
+        current_init_state_id = self.init_state_id
 
         # args that will go into VGDL Env.
         self._envargs = {
@@ -206,8 +211,11 @@ class StageTwo(MessengerEnv):
                 self.variant_id += 1
                 if self.variant_id >= len(self.game_variants):
                     self.variant_id = 0
+                    self.init_state_id += 1
+                    if self.init_state_id >= len(self.init_states):
+                        self.init_state_id = 0
             
-        return self._convert_obs(vgdl_obs), manual, current_game_id, current_variant_id
+        return self._convert_obs(vgdl_obs), manual, current_game_id, current_variant_id, current_init_state_id
 
     def step(self, action):
         vgdl_obs, reward, done, info = self.env.step(action)
