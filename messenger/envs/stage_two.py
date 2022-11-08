@@ -68,10 +68,17 @@ class StageTwo(MessengerEnv):
         self.text_manual = TextManual(json_path=text_json_path)
 
         # get the folder that has the game variants and init_states
-        if "test" in split and "se" not in split: # new dynamics (se for state estimation)
-            vgdl_files = this_folder.joinpath("vgdl_files", "stage_2_nd")
-        else: # training dynamics
-            vgdl_files = this_folder.joinpath("vgdl_files", "stage_2")
+        if "onlyallthree" in split:
+            vgdl_files = this_folder.joinpath("vgdl_files", "stage_2_onlyallthree")
+        elif "neverallthree" in split:
+            vgdl_files = this_folder.joinpath("vgdl_files", "stage_2_neverallthree")
+        else:
+            raise NotImplementedError
+
+        # if "test" in split and "se" not in split: # new dynamics (se for state estimation)
+        #     vgdl_files = this_folder.joinpath("vgdl_files", "stage_2_nd")
+        # else: # training dynamics
+        #     vgdl_files = this_folder.joinpath("vgdl_files", "stage_2")
         
         # get the file paths to possible starting states
         self.init_states = [
