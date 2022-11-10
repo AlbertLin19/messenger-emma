@@ -102,12 +102,8 @@ class StageOne(MessengerEnv):
         return {"entities": entities, "avatar": avatar}
 
     def reset(self):
-        self.game_id = random.randrange(len(self.all_games))
-        self.game = self.all_games[self.game_id]
+        self.game = random.choice(self.all_games)
         enemy, message, goal = self.game.enemy, self.game.message, self.game.goal
-
-        # variant is always same (no movement)
-        self.variant_id = -1
 
         # randomly choose where to put enemy, key, goal
         shuffled_pos = random.sample(self.positions, 4)
