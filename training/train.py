@@ -62,14 +62,15 @@ def train(args):
     # memory stores all the information needed by PPO to compute losses and make updates
     memory = Memory()
 
-    world_model = WorldModel(
-        emma=ppo.policy,
-        val_emb_dim=args.world_model_val_emb_dim,
-        latent_size=args.world_model_latent_size,
-        hidden_size=args.world_model_hidden_size,
-        learning_rate=args.world_model_learning_rate,
-        device=args.device
-    )
+    if args.world_model_train:
+        world_model = WorldModel(
+            emma=ppo.policy,
+            val_emb_dim=args.world_model_val_emb_dim,
+            latent_size=args.world_model_latent_size,
+            hidden_size=args.world_model_hidden_size,
+            learning_rate=args.world_model_learning_rate,
+            device=args.device
+        )
 
     # logging variables
     teststats = []
@@ -101,28 +102,33 @@ def train(args):
     while True: # main training loop
         obs, text = env.reset()
         obs = wrap_obs(obs)
-        tensor_obs = torch.from_numpy(obs).long().to(args.device)
+        if args.world_model_train:
+            tensor_obs = torch.from_numpy(obs).long().to(args.device)
         text = encoder.encode(text)
         buffer.reset(obs)
-        world_model.real_state_reset()
-        world_model.imag_state_reset(tensor_obs)
+        if args.world_model_train:
+            world_model.real_state_reset()
+            world_model.imag_state_reset(tensor_obs)
 
         # Episode loop
         for t in range(args.max_steps):
             timestep += 1
 
             old_obs = obs
-            old_tensor_obs = tensor_obs
+            if args.world_model_train:
+                old_tensor_obs = tensor_obs
 
             # Running policy_old:
             action = ppo.policy_old.act(buffer.get_obs(), text, memory)
             obs, reward, done, _ = env.step(action)
             obs = wrap_obs(obs)
-            tensor_obs = torch.from_numpy(obs).long().to(args.device)
+            if args.world_model_train:
+                tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
             # World model predictions
-            world_model.real_step(old_tensor_obs, text, action, tensor_obs)
-            world_model.imag_step(text, action, tensor_obs)
+            if args.world_model_train:
+                world_model.real_step(old_tensor_obs, text, action, tensor_obs)
+                world_model.imag_step(text, action, tensor_obs)
             
             # add the step penalty
             reward -= abs(args.step_penalty)
@@ -138,9 +144,10 @@ def train(args):
 
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
-                world_model.real_loss_update()
-                world_model.real_loss_clear()
-                world_model.imag_loss_clear()
+                if args.world_model_train:
+                    world_model.real_loss_update()
+                    world_model.real_loss_clear()
+                    world_model.imag_loss_clear()
                 ppo.update(memory)
                 memory.clear_memory()
                 timestep = 0
@@ -174,7 +181,8 @@ def train(args):
         if i_episode % args.eval_interval == 0:
             eval_stats.reset()
             ppo.policy_old.eval()
-            world_model.eval()
+            if args.world_model_train:
+                world_model.eval()
 
             for _ in range(args.eval_eps):
                 obs, text = eval_env.reset()
@@ -199,7 +207,8 @@ def train(args):
                 eval_stats.end_of_episode()
 
             ppo.policy_old.train()
-            world_model.train()
+            if args.world_model_train:
+                world_model.train()
 
             print("TEST: \t {}".format(eval_stats))
             teststats.append(eval_stats.compress(append={"step": train_stats.total_steps}))
@@ -235,6 +244,7 @@ if __name__ == "__main__":
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
 
     # World model arguments
+    parser.add_argument("--world_model_train", default=False, action="store_true", help="Whether to train a world model too.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_val_emb_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
@@ -267,6 +277,8 @@ if __name__ == "__main__":
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
 
     args = parser.parse_args()
+
+    print(args)
     
     # get hash of arguments minus seed
     args_dict = vars(args).copy()
