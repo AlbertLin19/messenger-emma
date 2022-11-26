@@ -138,11 +138,11 @@ def train(args):
 
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
-                ppo.update(memory)
-                memory.clear_memory()
                 world_model.real_loss_update()
                 world_model.real_loss_clear()
                 world_model.imag_loss_clear()
+                ppo.update(memory)
+                memory.clear_memory()
                 timestep = 0
                 
             if done:

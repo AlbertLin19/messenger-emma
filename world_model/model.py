@@ -21,9 +21,9 @@ class WorldModel(nn.Module):
         self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
         self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
         self.detector = nn.Sequential(
-            nn.Conv2d(in_channels=emb_dim, out_channels=emb_dim // 2, kernel_size=1, stride=1),
+            nn.Conv2d(in_channels=emb_dim, out_channels=(emb_dim + 17) // 2, kernel_size=1, stride=1),
             nn.ReLU(),
-            nn.Conv2d(in_channels=emb_dim // 2, out_channels=16, kernel_size=1, stride=1),
+            nn.Conv2d(in_channels=(emb_dim + 17) // 2, out_channels=17, kernel_size=1, stride=1),
         ).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
@@ -89,11 +89,16 @@ class WorldModel(nn.Module):
     def real_loss_clear(self):
         loss = self.real_loss.item()
         self.real_loss = 0
+        self.real_hidden_state = self.real_hidden_state.detach()
+        self.real_cell_state = self.real_cell_state.detach()
         return loss
 
     def imag_loss_clear(self):
         loss = self.imag_loss.item()
         self.imag_loss = 0
+        self.imag_hidden_state = self.imag_hidden_state.detach()
+        self.imag_cell_state = self.imag_cell_state.detach()
+        self.imag_old_multilabel = self.imag_old_multilabel.detach()
         return loss
 
     

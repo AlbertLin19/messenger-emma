@@ -2,3 +2,4 @@
 *.pth
 messenger.egg-info
 wandb
+output
