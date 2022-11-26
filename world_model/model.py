@@ -7,15 +7,21 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb
 
 class WorldModel(nn.Module):
-    def __init__(self, sprite_emb, val_emb_dim, latent_size, hidden_size, learning_rate, device):
+    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, device):
         super().__init__()
 
-        emb_dim = val_emb_dim
+        emb_dim = emma.emb_dim + val_emb_dim
 
         self.latent_size = latent_size 
         self.hidden_size = hidden_size
 
-        self.sprite_emb = sprite_emb
+        self.emma = emma
+        self.txt_val = nn.Linear(768, val_emb_dim).to(device)
+        self.scale_val = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Softmax(dim=-2)
+        ).to(device)
+
         self.encoder = Encoder(emb_dim, latent_size).to(device)
         self.decoder = Decoder(emb_dim, latent_size).to(device)
         self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
@@ -50,11 +56,11 @@ class WorldModel(nn.Module):
         self.imag_cell_state = torch.zeros((1, self.hidden_size), device=self.device)
         self.imag_old_multilabel = convert_obs_to_multilabel(init_obs)
 
-    def real_step(self, old_obs, action, obs):
+    def real_step(self, old_obs, text, action, obs):
         old_multilabel = convert_obs_to_multilabel(old_obs)
         multilabel = convert_obs_to_multilabel(obs)
 
-        old_latent = self.encode(convert_multilabel_to_emb(old_multilabel, self.sprite_emb))
+        old_latent = self.encode(convert_multilabel_to_emb(old_multilabel, text, self))
         action = F.one_hot(torch.tensor(action, device=obs.device), num_classes=5)
         lstm_in = torch.cat((old_latent, action), dim=-1).unsqueeze(0)
         lstm_out, (self.real_hidden_state, self.real_cell_state) = self.lstm(lstm_in, (self.real_hidden_state, self.real_cell_state))
@@ -63,10 +69,10 @@ class WorldModel(nn.Module):
 
         self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float())
 
-    def imag_step(self, action, obs):
+    def imag_step(self, text, action, obs):
         multilabel = convert_obs_to_multilabel(obs)
 
-        old_latent = self.encode(convert_multilabel_to_emb(self.imag_old_multilabel, self.sprite_emb))
+        old_latent = self.encode(convert_multilabel_to_emb(self.imag_old_multilabel, text, self))
         action = F.one_hot(torch.tensor(action, device=obs.device), num_classes=5)
         lstm_in = torch.cat((old_latent, action), dim=-1).unsqueeze(0)
         lstm_out, (self.imag_hidden_state, self.imag_cell_state) = self.lstm(lstm_in, (self.imag_hidden_state, self.imag_cell_state))

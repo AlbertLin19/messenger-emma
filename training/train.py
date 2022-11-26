@@ -63,7 +63,7 @@ def train(args):
     memory = Memory()
 
     world_model = WorldModel(
-        sprite_emb=ppo.policy.sprite_emb,
+        emma=ppo.policy,
         val_emb_dim=args.world_model_val_emb_dim,
         latent_size=args.world_model_latent_size,
         hidden_size=args.world_model_hidden_size,
@@ -121,8 +121,8 @@ def train(args):
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
             # World model predictions
-            world_model.real_step(old_tensor_obs, action, tensor_obs)
-            world_model.imag_step(action, tensor_obs)
+            world_model.real_step(old_tensor_obs, text, action, tensor_obs)
+            world_model.imag_step(text, action, tensor_obs)
             
             # add the step penalty
             reward -= abs(args.step_penalty)
