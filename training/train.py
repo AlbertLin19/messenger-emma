@@ -19,6 +19,7 @@ import numpy as np
 
 from model import TrainEMMA, Memory
 from train_tools import ObservationBuffer, PPO, TrainStats
+from world_model.model import WorldModel
 
 
 def wrap_obs(obs):
@@ -61,6 +62,15 @@ def train(args):
     # memory stores all the information needed by PPO to compute losses and make updates
     memory = Memory()
 
+    world_model = WorldModel(
+        sprite_emb=ppo.policy.sprite_emb,
+        val_emb_dim=args.world_model_val_emb_dim,
+        latent_size=args.world_model_latent_size,
+        hidden_size=args.world_model_hidden_size,
+        learning_rate=args.world_model_learning_rate,
+        device=args.device
+    )
+
     # logging variables
     teststats = []
     runstats = []
@@ -91,17 +101,28 @@ def train(args):
     while True: # main training loop
         obs, text = env.reset()
         obs = wrap_obs(obs)
+        tensor_obs = torch.from_numpy(obs).long().to(args.device)
         text = encoder.encode(text)
         buffer.reset(obs)
+        world_model.real_state_reset()
+        world_model.imag_state_reset(tensor_obs)
 
         # Episode loop
         for t in range(args.max_steps):
             timestep += 1
 
+            old_obs = obs
+            old_tensor_obs = tensor_obs
+
             # Running policy_old:
             action = ppo.policy_old.act(buffer.get_obs(), text, memory)
             obs, reward, done, _ = env.step(action)
             obs = wrap_obs(obs)
+            tensor_obs = torch.from_numpy(obs).long().to(args.device)
+
+            # World model predictions
+            world_model.real_step(old_tensor_obs, action, tensor_obs)
+            world_model.imag_step(action, tensor_obs)
             
             # add the step penalty
             reward -= abs(args.step_penalty)
@@ -115,10 +136,13 @@ def train(args):
             memory.rewards.append(reward)
             memory.is_terminals.append(done)
 
-            # update the model if its time
+            # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
                 ppo.update(memory)
                 memory.clear_memory()
+                world_model.real_loss_update()
+                world_model.real_loss_clear()
+                world_model.imag_loss_clear()
                 timestep = 0
                 
             if done:
@@ -150,6 +174,7 @@ def train(args):
         if i_episode % args.eval_interval == 0:
             eval_stats.reset()
             ppo.policy_old.eval()
+            world_model.eval()
 
             for _ in range(args.eval_eps):
                 obs, text = eval_env.reset()
@@ -174,6 +199,7 @@ def train(args):
                 eval_stats.end_of_episode()
 
             ppo.policy_old.train()
+            world_model.train()
 
             print("TEST: \t {}".format(eval_stats))
             teststats.append(eval_stats.compress(append={"step": train_stats.total_steps}))
@@ -208,6 +234,13 @@ if __name__ == "__main__":
     parser.add_argument("--hist_len", default=3, type=int, help="Length of history used by state buffer")
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
 
+    # World model arguments
+    parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
+    parser.add_argument("--world_model_val_emb_dim", default=256, type=int, help="World model value embedding dimension.")
+    parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
+    parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
+    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    
     # Environment arguments
     parser.add_argument("--stage", default=1, type=int, help="the stage to run experiment on")
     parser.add_argument("--max_steps", default=4, type=int, help="Maximum num of steps per episode")

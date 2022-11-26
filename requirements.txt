@@ -1,0 +1,53 @@
+brotlipy==0.7.0
+certifi @ file:///C:/b/abs_ac29jvt43w/croot/certifi_1665076682579/work/certifi
+cffi @ file:///C:/b/abs_1ap6nyvrws/croot/cffi_1669354597473/work
+charset-normalizer @ file:///tmp/build/80754af9/charset-normalizer_1630003229654/work
+click==8.1.3
+cloudpickle==2.2.0
+colorama==0.4.6
+cryptography @ file:///C:/b/abs_36x9ifdcl4/croot/cryptography_1665612655344/work
+docker-pycreds==0.4.0
+filelock==3.8.0
+gitdb==4.0.10
+GitPython==3.1.29
+gym==0.23.1
+gym-notices==0.0.8
+huggingface-hub==0.11.0
+idna @ file:///C:/b/abs_bdhbebrioa/croot/idna_1666125572046/work
+-e git+https://github.com/AlbertLin19/messenger-emma.git@3ef8e3623a3dad57e70e320b4caf635a036930ae#egg=messenger
+mkl-fft==1.3.1
+mkl-random @ file:///C:/ci_310/mkl_random_1643050563308/work
+mkl-service==2.4.0
+numpy @ file:///C:/b/abs_5ct9ex77k9/croot/numpy_and_numpy_base_1668593740598/work
+packaging==21.3
+pathtools==0.1.2
+Pillow==9.2.0
+promise==2.3
+protobuf==4.21.9
+psutil==5.9.4
+PyBrain==0.3
+pycparser @ file:///tmp/build/80754af9/pycparser_1636541352034/work
+pygame==2.1.2
+pyOpenSSL @ file:///opt/conda/conda-bld/pyopenssl_1643788558760/work
+pyparsing==3.0.9
+PySocks @ file:///C:/ci_310/pysocks_1642089375450/work
+PyYAML==6.0
+regex==2022.10.31
+requests @ file:///C:/ci/requests_1657735340829/work
+sentry-sdk==1.11.1
+setproctitle==1.3.2
+shortuuid==1.0.11
+six @ file:///tmp/build/80754af9/six_1644875935023/work
+smmap==5.0.0
+tokenizers==0.13.2
+torch==1.13.0
+torchaudio==0.13.0
+torchvision==0.14.0
+tqdm==4.64.1
+transformers==4.24.0
+typing_extensions @ file:///C:/Windows/TEMP/abs_dd2d0moa85/croots/recipe/typing_extensions_1659638831135/work
+urllib3 @ file:///C:/b/abs_a8_3vfznn_/croot/urllib3_1666298943664/work
+vgdl @ git+https://github.com/ahjwang/py-vgdl@fd1198c93efd27cb465c7f0b05e07a6e9cda8cea
+wandb==0.13.4
+win-inet-pton @ file:///C:/ci_310/win_inet_pton_1642658466512/work
+wincertstore==0.2
