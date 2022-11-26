@@ -284,8 +284,6 @@ if __name__ == "__main__":
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
 
     args = parser.parse_args()
-
-    print(args)
     
     # get hash of arguments minus seed
     args_dict = vars(args).copy()
