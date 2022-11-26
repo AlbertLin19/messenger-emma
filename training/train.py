@@ -99,6 +99,9 @@ def train(args):
     max_train_win = -1
     start_time = time.time()
 
+    # used to switch phases of training policy and world model, if specified
+    policy_phase = True
+
     while True: # main training loop
         obs, text = env.reset()
         obs = wrap_obs(obs)
@@ -145,11 +148,14 @@ def train(args):
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
                 if args.world_model_train:
-                    world_model.real_loss_update()
+                    if not args.world_model_train_alternatingly or not policy_phase:
+                        world_model.real_loss_update()
                     world_model.real_loss_clear()
                     world_model.imag_loss_clear()
-                ppo.update(memory)
+                if not args.world_model_train_alternatingly or policy_phase:
+                    ppo.update(memory)
                 memory.clear_memory()
+                policy_phase = not policy_phase
                 timestep = 0
                 
             if done:
@@ -245,6 +251,7 @@ if __name__ == "__main__":
 
     # World model arguments
     parser.add_argument("--world_model_train", default=False, action="store_true", help="Whether to train a world model too.")
+    parser.add_argument("--world_model_train_alternatingly", default=False, action="store_true", help="Whether to have separate training phases for policy and world model.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_val_emb_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
