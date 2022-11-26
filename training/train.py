@@ -159,6 +159,11 @@ def train(args):
                 memory.clear_memory()
                 policy_phase = not policy_phase
                 timestep = 0
+                wandb.log({
+                    'step': train_stats.total_steps,
+                    'policy_loss': policy_loss,
+                    'world_model_loss': world_model_loss
+                })
                 
             if done:
                 break
@@ -177,11 +182,7 @@ def train(args):
             print("Episode {} \t {}".format(i_episode, train_stats))
             runstats.append(train_stats.compress())
             if not args.check_script:
-                wandb.log({
-                    **runstats[-1],
-                    'policy_loss': policy_loss,
-                    'world_model_loss': world_model_loss
-                })
+                wandb.log(runstats[-1])
             
             if train_stats.compress()['win'] > max_train_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
