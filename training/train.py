@@ -97,6 +97,7 @@ def train(args):
     # training variables
     i_episode = 0
     timestep = 0
+    updatestep = 0
     max_win = -1
     max_train_win = -1
     start_time = time.time()
@@ -149,6 +150,7 @@ def train(args):
 
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
+                updatestep += 1
                 if args.world_model_train:
                     if not args.world_model_train_alternatingly or not policy_phase:
                         world_model_loss = world_model.real_loss_update()
@@ -159,11 +161,13 @@ def train(args):
                 memory.clear_memory()
                 policy_phase = not policy_phase
                 timestep = 0
-                wandb.log({
-                    'step': train_stats.total_steps,
-                    'policy_loss': policy_loss,
-                    'world_model_loss': world_model_loss
-                })
+                if updatestep % args.log_loss_interval == 0:
+                    wandb.log({
+                        'step': train_stats.total_steps,
+                        'policy_loss': policy_loss,
+                        'world_model_loss': world_model_loss
+                    })
+                    updatestep = 0
                 
             if done:
                 break
@@ -283,6 +287,7 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_attention", action="store_true", help="Do not update attention weights.")
 
     # Logging arguments
+    parser.add_argument('--log_loss_interval', default=50, type=int, help='number of loss updates between logging')
     parser.add_argument('--log_interval', default=5000, type=int, help='number of episodes between logging')
     parser.add_argument('--eval_interval', default=25000, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
