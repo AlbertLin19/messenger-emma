@@ -96,6 +96,7 @@ class PPO:
         old_logprobs = torch.stack(memory.logprobs).to(self.device).detach()
         old_texts = torch.stack(memory.texts).to(self.device).detach()
         
+        accum_loss = 0
         # Optimize policy for K epochs:
         for _ in range(self.K_epochs):
             # Evaluating old actions and values :
@@ -114,12 +115,16 @@ class PPO:
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+
+            accum_loss += loss.mean().item()
         
         # zero out the padding_idx for sprite embedder (temp fix for PyTorch bug)
         self.policy.sprite_emb.weight.data[0] = 0
         
         # Copy new weights into old policy:
         self.policy_old.load_state_dict(self.policy.state_dict())
+
+        return accum_loss / self.K_epochs
 
 
 class TrainStats:

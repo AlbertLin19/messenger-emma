@@ -75,6 +75,8 @@ def train(args):
     # logging variables
     teststats = []
     runstats = []
+    policy_loss = None
+    world_model_loss = None
         
     # make the environments
     env = gym.make(f'msgr-train-v{args.stage}')
@@ -149,11 +151,11 @@ def train(args):
             if timestep % args.update_timestep == 0:
                 if args.world_model_train:
                     if not args.world_model_train_alternatingly or not policy_phase:
-                        world_model.real_loss_update()
+                        world_model_loss = world_model.real_loss_update()
                     world_model.real_loss_clear()
                     world_model.imag_loss_clear()
                 if not args.world_model_train_alternatingly or policy_phase:
-                    ppo.update(memory)
+                    policy_loss = ppo.update(memory)
                 memory.clear_memory()
                 policy_phase = not policy_phase
                 timestep = 0
@@ -175,7 +177,11 @@ def train(args):
             print("Episode {} \t {}".format(i_episode, train_stats))
             runstats.append(train_stats.compress())
             if not args.check_script:
-                wandb.log(runstats[-1])
+                wandb.log({
+                    **runstats[-1],
+                    'policy_loss': policy_loss,
+                    'world_model_loss': world_model_loss
+                })
             
             if train_stats.compress()['win'] > max_train_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")

@@ -86,11 +86,13 @@ class WorldModel(nn.Module):
         self.optimizer.zero_grad()
         self.real_loss.backward()
         self.optimizer.step()
+        return self.real_loss.item()
 
     def imag_loss_update(self):
         self.optimizer.zero_grad()
         self.imag_loss.backward()
         self.optimizer.step()
+        return self.imag_loss.item()
 
     def real_loss_clear(self):
         loss = self.real_loss.item()
