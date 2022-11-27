@@ -170,10 +170,10 @@ def train(args):
                     updatelog = {'step': train_stats.total_steps}
                     if args.world_model_train:
                         updatelod.update({'world_model_loss': world_model_loss})
+                        updatelog.update(real_loss_and_metrics)
+                        updatelog.update(imag_loss_and_metrics)
                     if not args.freeze_policy:
                         updatelog.update({'policy_loss': policy_loss})
-                    updatelog.update(real_loss_and_metrics)
-                    updatelog.update(imag_loss_and_metrics)
                     wandb.log(updatelog)
                     updatestep = 0
                 
