@@ -2,7 +2,9 @@ import torch
 import torch.nn.functional as F
 
 def convert_obs_to_multilabel(obs):
-    return torch.sum(F.one_hot(obs, num_classes=17), dim=-2)
+    multilabel = torch.sum(F.one_hot(obs, num_classes=17), dim=-2)
+    multilabel[..., 0] = torch.logical_not(torch.sum(obs > 0, dim=-1))
+    return multilabel
 
 def convert_multilabel_to_emb(multilabel, text, world_model):
     query = world_model.emma.sprite_emb(torch.arange(17, device=multilabel.device)) # 17 x sprite_emb_dim
