@@ -48,6 +48,9 @@ class WorldModel(nn.Module):
 
         self.device = device
 
+        self.pos_weight = 300*torch.ones(17, device=device)
+        self.pos_weight[0] = 3 / 100
+
     def encode(self, emb):
         return self.encoder(emb.permute(2, 0, 1))
 
@@ -86,7 +89,7 @@ class WorldModel(nn.Module):
         latent = self.projection(lstm_out.squeeze(0))
         pred_multilabel_logit = self.detect(self.decode(latent))
 
-        self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=torch.sum(multilabel <= 0, dim=(0, 1)) / torch.sum(multilabel > 0, dim=(0, 1)))
+        self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
         confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
@@ -105,7 +108,7 @@ class WorldModel(nn.Module):
 
         self.imag_old_multilabel = 1*(pred_multilabel_logit > 0)
 
-        self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=torch.sum(multilabel <= 0, dim=(0, 1)) / torch.sum(multilabel > 0, dim=(0, 1)))
+        self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
         confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
