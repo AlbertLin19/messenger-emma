@@ -129,12 +129,12 @@ class WorldModel(nn.Module):
         precision = self.real_tp / (self.real_tp + self.real_fp)
         metrics = {
             'real_loss': self.real_loss.item(),
-            'real_recall_sprite': recall[1:].mean(),
-            'real_precision_sprite': precision[1:].mean(),
-            'real_recall_entity': recall[1:15].mean(),
-            'real_precision_entity': precision[1:15].mean(),
-            'real_recall_avatar': recall[15:17].mean(),
-            'real_precision_avatar': precision[15:17].mean()
+            'real_recall_sprite': recall[1:].nanmean(),
+            'real_precision_sprite': precision[1:].nanmean(),
+            'real_recall_entity': recall[1:15].nanmean(),
+            'real_precision_entity': precision[1:15].nanmean(),
+            'real_recall_avatar': recall[15:17].nanmean(),
+            'real_precision_avatar': precision[15:17].nanmean()
         }
         metrics.update({f'real_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'real_precision_{i}': precision[i] for i in range(len(precision))})
@@ -152,12 +152,12 @@ class WorldModel(nn.Module):
         precision = self.imag_tp / (self.imag_tp + self.imag_fp)
         metrics = {
             'imag_loss': self.imag_loss.item(),
-            'imag_recall_sprite': recall[1:].mean(),
-            'imag_precision_sprite': precision[1:].mean(),
-            'imag_recall_entity': recall[1:15].mean(),
-            'imag_precision_entity': precision[1:15].mean(),
-            'imag_recall_avatar': recall[15:17].mean(),
-            'imag_precision_avatar': precision[15:17].mean()
+            'imag_recall_sprite': recall[1:].nanmean(),
+            'imag_precision_sprite': precision[1:].nanmean(),
+            'imag_recall_entity': recall[1:15].nanmean(),
+            'imag_precision_entity': precision[1:15].nanmean(),
+            'imag_recall_avatar': recall[15:17].nanmean(),
+            'imag_precision_avatar': precision[15:17].nanmean()
         }
         metrics.update({f'imag_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'imag_precision_{i}': precision[i] for i in range(len(precision))})
