@@ -75,8 +75,6 @@ def train(args):
     # logging variables
     teststats = []
     runstats = []
-    policy_loss = None
-    world_model_loss = None
         
     # make the environments
     env = gym.make(f'msgr-train-v{args.stage}')
@@ -154,19 +152,24 @@ def train(args):
                 if args.world_model_train:
                     if not args.world_model_train_alternatingly or not policy_phase:
                         world_model_loss = world_model.real_loss_update()
-                    world_model.real_loss_clear()
-                    world_model.imag_loss_clear()
+                    world_model.real_state_detach()
+                    world_model.imag_state_detach()
+                    real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
+                    imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
                 if not args.world_model_train_alternatingly or policy_phase:
                     policy_loss = ppo.update(memory)
                 memory.clear_memory()
                 policy_phase = not policy_phase
                 timestep = 0
                 if updatestep % args.log_loss_interval == 0:
-                    wandb.log({
+                    updatelog = {
                         'step': train_stats.total_steps,
                         'policy_loss': policy_loss,
                         'world_model_loss': world_model_loss
-                    })
+                    }
+                    updatelog.update(real_loss_and_metrics)
+                    updatelog.update(imag_loss_and_metrics)
+                    wandb.log(updatelog)
                     updatestep = 0
                 
             if done:

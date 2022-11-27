@@ -36,6 +36,16 @@ class WorldModel(nn.Module):
         self.real_loss = 0
         self.imag_loss = 0
 
+        self.real_tp = torch.zeros(17, dtype=int, device=device)
+        self.real_fn = torch.zeros(17, dtype=int, device=device)
+        self.real_fp = torch.zeros(17, dtype=int, device=device)
+        self.real_tn = torch.zeros(17, dtype=int, device=device)
+
+        self.imag_tp = torch.zeros(17, dtype=int, device=device)
+        self.imag_fn = torch.zeros(17, dtype=int, device=device)
+        self.imag_fp = torch.zeros(17, dtype=int, device=device)
+        self.imag_tn = torch.zeros(17, dtype=int, device=device)
+
         self.device = device
 
     def encode(self, emb):
@@ -56,6 +66,15 @@ class WorldModel(nn.Module):
         self.imag_cell_state = torch.zeros((1, self.hidden_size), device=self.device)
         self.imag_old_multilabel = convert_obs_to_multilabel(init_obs)
 
+    def real_state_detach(self):
+        self.real_hidden_state = self.real_hidden_state.detach()
+        self.real_cell_state = self.real_cell_state.detach()
+
+    def imag_state_detach(self):
+        self.imag_hidden_state = self.imag_hidden_state.detach()
+        self.imag_cell_state = self.imag_cell_state.detach()
+        self.imag_old_multilabel = self.imag_old_multilabel.detach()
+
     def real_step(self, old_obs, text, action, obs):
         old_multilabel = convert_obs_to_multilabel(old_obs)
         multilabel = convert_obs_to_multilabel(obs)
@@ -68,6 +87,11 @@ class WorldModel(nn.Module):
         pred_multilabel_logit = self.detect(self.decode(latent))
 
         self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float())
+        confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
+        self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
+        self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
+        self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
 
     def imag_step(self, text, action, obs):
         multilabel = convert_obs_to_multilabel(obs)
@@ -79,8 +103,14 @@ class WorldModel(nn.Module):
         latent = self.projection(lstm_out.squeeze(0))
         pred_multilabel_logit = self.detect(self.decode(latent))
 
-        self.imag_old_multilabel = torch.sigmoid(pred_multilabel_logit)
+        self.imag_old_multilabel = 1*(pred_multilabel_logit > 0)
+
         self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float())
+        confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
+        self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
+        self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
+        self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
 
     def real_loss_update(self):
         self.optimizer.zero_grad()
@@ -94,19 +124,33 @@ class WorldModel(nn.Module):
         self.optimizer.step()
         return self.imag_loss.item()
 
-    def real_loss_clear(self):
-        loss = self.real_loss.item()
+    def real_loss_and_metrics_reset(self):
+        recall = self.real_tp / (self.real_tp + self.real_fn)
+        precision = self.real_tp / (self.real_tp + self.real_fp)
+        metrics = {'real_loss': self.real_loss.item()}
+        metrics.update({f'real_recall_{i}': recall[i] for i in range(len(recall))})
+        metrics.update({f'real_precision_{i}': precision[i] for i in range(len(precision))})
+        
         self.real_loss = 0
-        self.real_hidden_state = self.real_hidden_state.detach()
-        self.real_cell_state = self.real_cell_state.detach()
-        return loss
+        self.real_tp = torch.zeros(17, dtype=int, device=self.device)
+        self.real_fn = torch.zeros(17, dtype=int, device=self.device)
+        self.real_fp = torch.zeros(17, dtype=int, device=self.device)
+        self.real_tn = torch.zeros(17, dtype=int, device=self.device)
 
-    def imag_loss_clear(self):
-        loss = self.imag_loss.item()
+        return metrics
+
+    def imag_loss_and_metrics_reset(self):
+        recall = self.imag_tp / (self.imag_tp + self.imag_fn)
+        precision = self.imag_tp / (self.imag_tp + self.imag_fp)
+        metrics = {'imag_loss': self.imag_loss.item()}
+        metrics.update({f'imag_recall_{i}': recall[i] for i in range(len(recall))})
+        metrics.update({f'imag_precision_{i}': precision[i] for i in range(len(precision))})
+        
         self.imag_loss = 0
-        self.imag_hidden_state = self.imag_hidden_state.detach()
-        self.imag_cell_state = self.imag_cell_state.detach()
-        self.imag_old_multilabel = self.imag_old_multilabel.detach()
-        return loss
+        self.imag_tp = torch.zeros(17, dtype=int, device=self.device)
+        self.imag_fn = torch.zeros(17, dtype=int, device=self.device)
+        self.imag_fp = torch.zeros(17, dtype=int, device=self.device)
+        self.imag_tn = torch.zeros(17, dtype=int, device=self.device)
 
+        return metrics
     
