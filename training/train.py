@@ -62,9 +62,14 @@ def train(args):
     # memory stores all the information needed by PPO to compute losses and make updates
     memory = Memory()
 
+    if args.world_model_train_separately:
+        emma = TrainEMMA(**model_kwargs).to(args.device) 
+    else:
+        emma = ppo.policy
+
     if args.world_model_train:
         world_model = WorldModel(
-            emma=ppo.policy,
+            emma=emma,
             val_emb_dim=args.world_model_val_emb_dim,
             latent_size=args.world_model_latent_size,
             hidden_size=args.world_model_hidden_size,
@@ -156,7 +161,7 @@ def train(args):
                     world_model.imag_state_detach()
                     real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
                     imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
-                if not args.world_model_train_alternatingly or policy_phase:
+                if not args.freeze_policy and (not args.world_model_train_alternatingly or policy_phase):
                     policy_loss = ppo.update(memory)
                 memory.clear_memory()
                 policy_phase = not policy_phase
@@ -266,6 +271,7 @@ if __name__ == "__main__":
     # World model arguments
     parser.add_argument("--world_model_train", default=False, action="store_true", help="Whether to train a world model too.")
     parser.add_argument("--world_model_train_alternatingly", default=False, action="store_true", help="Whether to have separate training phases for policy and world model.")
+    parser.add_argument("--world_model_train_separately", default=False, action="store_true", help="Whether to have separate networks for policy and world model.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_val_emb_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
@@ -287,7 +293,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", default=0.0, type=float, help="weight decay for optimizer")
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
     parser.add_argument("--max_eps", default=1e10, type=float, help="max training episodes")
-    parser.add_argument("--freeze_attention", action="store_true", help="Do not update attention weights.")
+    parser.add_argument("--freeze_attention", default=False, action="store_true", help="Do not update attention weights.")
+    parser.add_argument("--freeze_policy", default=False, action="store_true", help="Do not update policy network.")
 
     # Logging arguments
     parser.add_argument('--log_loss_interval', default=50, type=int, help='number of loss updates between logging')

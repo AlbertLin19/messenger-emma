@@ -127,17 +127,22 @@ class WorldModel(nn.Module):
     def real_loss_and_metrics_reset(self):
         recall = self.real_tp / (self.real_tp + self.real_fn)
         precision = self.real_tp / (self.real_tp + self.real_fp)
+        f1 = (2 * recall * precision) / (recall + precision)
         metrics = {
             'real_loss': self.real_loss.item(),
             'real_recall_sprite': recall[1:].nanmean(),
             'real_precision_sprite': precision[1:].nanmean(),
+            'real_f1_sprite': f1[1:].nanmean(),
             'real_recall_entity': recall[1:15].nanmean(),
             'real_precision_entity': precision[1:15].nanmean(),
+            'real_f1_entity': f1[1:15].nanmean(),
             'real_recall_avatar': recall[15:17].nanmean(),
-            'real_precision_avatar': precision[15:17].nanmean()
+            'real_precision_avatar': precision[15:17].nanmean(),
+            'real_f1_avatar': f1[15:17].nanmean()
         }
         metrics.update({f'real_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'real_precision_{i}': precision[i] for i in range(len(precision))})
+        metrics.update({f'real_f1_{i}': f1[i] for i in range(len(f1))})
         
         self.real_loss = 0
         self.real_tp = torch.zeros(17, dtype=int, device=self.device)
@@ -150,17 +155,22 @@ class WorldModel(nn.Module):
     def imag_loss_and_metrics_reset(self):
         recall = self.imag_tp / (self.imag_tp + self.imag_fn)
         precision = self.imag_tp / (self.imag_tp + self.imag_fp)
+        f1 = (2 * recall * precision) / (recall + precision)
         metrics = {
             'imag_loss': self.imag_loss.item(),
             'imag_recall_sprite': recall[1:].nanmean(),
             'imag_precision_sprite': precision[1:].nanmean(),
+            'imag_f1_sprite': f1[1:].nanmean(),
             'imag_recall_entity': recall[1:15].nanmean(),
             'imag_precision_entity': precision[1:15].nanmean(),
+            'imag_f1_entity': f1[1:15].nanmean(),
             'imag_recall_avatar': recall[15:17].nanmean(),
-            'imag_precision_avatar': precision[15:17].nanmean()
+            'imag_precision_avatar': precision[15:17].nanmean(),
+            'imag_f1_avatar': f1[15:17].nanmean()
         }
         metrics.update({f'imag_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'imag_precision_{i}': precision[i] for i in range(len(precision))})
+        metrics.update({f'imag_f1_{i}': f1[i] for i in range(len(f1))})
         
         self.imag_loss = 0
         self.imag_tp = torch.zeros(17, dtype=int, device=self.device)
