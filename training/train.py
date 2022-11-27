@@ -169,7 +169,7 @@ def train(args):
                 if updatestep % args.log_loss_interval == 0:
                     updatelog = {'step': train_stats.total_steps}
                     if args.world_model_train:
-                        updatelod.update({'world_model_loss': world_model_loss})
+                        updatelog.update({'world_model_loss': world_model_loss})
                         updatelog.update(real_loss_and_metrics)
                         updatelog.update(imag_loss_and_metrics)
                     if not args.freeze_policy:
