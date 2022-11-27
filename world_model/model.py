@@ -127,7 +127,15 @@ class WorldModel(nn.Module):
     def real_loss_and_metrics_reset(self):
         recall = self.real_tp / (self.real_tp + self.real_fn)
         precision = self.real_tp / (self.real_tp + self.real_fp)
-        metrics = {'real_loss': self.real_loss.item()}
+        metrics = {
+            'real_loss': self.real_loss.item(),
+            'real_recall_sprite': recall[1:].mean(),
+            'real_precision_sprite': precision[1:].mean(),
+            'real_recall_entity': recall[1:15].mean(),
+            'real_precision_entity': precision[1:15].mean(),
+            'real_recall_avatar': recall[15:17].mean(),
+            'real_precision_avatar': precision[15:17].mean()
+        }
         metrics.update({f'real_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'real_precision_{i}': precision[i] for i in range(len(precision))})
         
@@ -142,7 +150,15 @@ class WorldModel(nn.Module):
     def imag_loss_and_metrics_reset(self):
         recall = self.imag_tp / (self.imag_tp + self.imag_fn)
         precision = self.imag_tp / (self.imag_tp + self.imag_fp)
-        metrics = {'imag_loss': self.imag_loss.item()}
+        metrics = {
+            'imag_loss': self.imag_loss.item(),
+            'imag_recall_sprite': recall[1:].mean(),
+            'imag_precision_sprite': precision[1:].mean(),
+            'imag_recall_entity': recall[1:15].mean(),
+            'imag_precision_entity': precision[1:15].mean(),
+            'imag_recall_avatar': recall[15:17].mean(),
+            'imag_precision_avatar': precision[15:17].mean()
+        }
         metrics.update({f'imag_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'imag_precision_{i}': precision[i] for i in range(len(precision))})
         
