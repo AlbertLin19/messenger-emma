@@ -7,7 +7,7 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb
 
 class WorldModel(nn.Module):
-    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, device):
+    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, device):
         super().__init__()
 
         emb_dim = emma.emb_dim + val_emb_dim
@@ -48,8 +48,14 @@ class WorldModel(nn.Module):
 
         self.device = device
 
-        self.pos_weight = 300*torch.ones(17, device=device)
-        self.pos_weight[0] = 3 / 100
+        self.loss_type = loss_type
+        if self.loss_type == "binary_cross_entropy":
+            self.pos_weight = 10*torch.ones(17, device=device)
+            self.pos_weight[0] = 3 / 100
+        elif self.loss_type == "cross_entropy":
+            self.pos_threshold = 0.2
+        else:
+            raise NotImplementedError
 
     def encode(self, emb):
         return self.encoder(emb.permute(2, 0, 1))
@@ -89,8 +95,14 @@ class WorldModel(nn.Module):
         latent = self.projection(lstm_out.squeeze(0))
         pred_multilabel_logit = self.detect(self.decode(latent))
 
-        self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
-        confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        if self.loss_type == "binary_cross_entropy":
+            self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
+            confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        elif self.loss_type == "cross_entropy":
+            self.real_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1))
+            confusion = (F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        else:
+            raise NotImplementedError
         self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
@@ -106,10 +118,19 @@ class WorldModel(nn.Module):
         latent = self.projection(lstm_out.squeeze(0))
         pred_multilabel_logit = self.detect(self.decode(latent))
 
-        self.imag_old_multilabel = 1*(pred_multilabel_logit > 0)
+        if self.loss_type == "binary_cross_entropy":
+            self.imag_old_multilabel = 1*(pred_multilabel_logit > 0)
+        elif self.loss_type == "cross_entropy":
+            self.imag_old_multilabel = 1*(F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold)
 
-        self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
-        confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        if self.loss_type == "binary_cross_entropy":
+            self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
+            confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        elif self.loss_type == "cross_entropy":
+            self.imag_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1))
+            confusion = (F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+        else:
+            raise NotImplementedError
         self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))

@@ -59,6 +59,13 @@ def train(args):
         ppo.policy.freeze_attention()
         ppo.policy_old.freeze_attention()
 
+    # freeze policy entirely
+    if args.freeze_policy:
+        for param in ppo.policy.parameters():
+            param.requires_grad = False 
+        for param in ppo.policy_old.parameters():
+            param.requires_grad = False 
+
     # memory stores all the information needed by PPO to compute losses and make updates
     memory = Memory()
 
@@ -74,6 +81,7 @@ def train(args):
             latent_size=args.world_model_latent_size,
             hidden_size=args.world_model_hidden_size,
             learning_rate=args.world_model_learning_rate,
+            loss_type=args.world_model_loss_type,
             device=args.device
         )
 
@@ -109,7 +117,7 @@ def train(args):
     policy_phase = True
 
     while True: # main training loop
-        obs, text = env.reset()
+        obs, text = env.reset(no_type_p=args.no_type_p)
         obs = wrap_obs(obs)
         if args.world_model_train:
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
@@ -210,7 +218,7 @@ def train(args):
                 world_model.eval()
 
             for _ in range(args.eval_eps):
-                obs, text = eval_env.reset()
+                obs, text = eval_env.reset(no_type_p=args.no_type_p)
                 obs = wrap_obs(obs)
                 text = encoder.encode(text)
                 buffer.reset(obs)
@@ -277,11 +285,13 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_loss_type", default="cross_entropy", choices=["binary_cross_entropy", "cross_entropy"], help="Which loss to use.")
     
     # Environment arguments
     parser.add_argument("--stage", default=1, type=int, help="the stage to run experiment on")
     parser.add_argument("--max_steps", default=4, type=int, help="Maximum num of steps per episode")
     parser.add_argument("--step_penalty", default=0.0, type=float, help="negative reward for each step")
+    parser.add_argument("--no_type_p", default=0.15, type=float, help="the probability of getting no movement type info in manual description")
     
     # Training arguments
     parser.add_argument("--update_timestep", default=64, type=int, help="Number of steps before model update")
