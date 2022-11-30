@@ -59,6 +59,12 @@ class WorldModel(nn.Module):
         else:
             raise NotImplementedError
 
+        # EPISODE LOGGING
+        self.true_real_grids = []
+        self.true_imag_grids = []
+        self.pred_real_grids = []
+        self.pred_imag_grids = []
+
     def encode(self, emb):
         return self.encoder(emb.permute(2, 0, 1))
 
@@ -110,6 +116,18 @@ class WorldModel(nn.Module):
         self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
 
+        # EPISODE LOGGING
+        if self.loss_type == "binary_cross_entropy":
+            true_grid = multilabel.cpu() 
+            pred_grid = torch.sigmoid(pred_multilabel_logit).detach().cpu()
+        elif self.loss_type == "cross_entropy":
+            true_grid = (multilabel / multilabel.sum(dim=-1, keepdim=True)).cpu()
+            pred_grid = torch.softmax(pred_multilabel_logit, dim=-1).detach().cpu()
+        else:
+            raise NotImplementedError
+        self.true_real_grids.append(true_grid)
+        self.pred_real_grids.append(pred_grid)
+
     def imag_step(self, text, action, obs):
         multilabel = convert_obs_to_multilabel(obs)
 
@@ -137,6 +155,18 @@ class WorldModel(nn.Module):
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
+
+        # EPISODE LOGGING
+        if self.loss_type == "binary_cross_entropy":
+            true_grid = multilabel.cpu()
+            pred_grid = torch.sigmoid(pred_multilabel_logit).detach().cpu()
+        elif self.loss_type == "cross_entropy":
+            true_grid = (multilabel / multilabel.sum(dim=-1, keepdim=True)).cpu()
+            pred_grid = torch.softmax(pred_multilabel_logit, dim=-1).detach().cpu()
+        else:
+            raise NotImplementedError
+        self.true_imag_grids.append(true_grid)
+        self.pred_imag_grids.append(pred_grid)
 
     def real_loss_update(self):
         self.optimizer.zero_grad()
@@ -205,4 +235,10 @@ class WorldModel(nn.Module):
         self.imag_tn = torch.zeros(17, dtype=int, device=self.device)
 
         return metrics
+
+    def episode_logs_reset(self):
+        self.true_real_grids = []
+        self.true_imag_grids = []
+        self.pred_real_grids = []
+        self.pred_imag_grids = []
     

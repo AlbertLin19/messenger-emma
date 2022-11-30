@@ -13,6 +13,7 @@ import gym
 import messenger # this needs to be imported even though its not used to register gym environment ids
 from messenger.models.utils import Encoder
 import torch
+import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
 import wandb
 import numpy as np
@@ -136,7 +137,11 @@ def train(args):
                 old_tensor_obs = tensor_obs
 
             # Running policy_old:
-            action = ppo.policy_old.act(buffer.get_obs(), text, memory)
+            if args.freeze_policy:
+                with torch.no_grad():
+                    action = ppo.policy_old.act(buffer.get_obs(), text, memory)
+            else:
+                action = ppo.policy_old.act(buffer.get_obs(), text, memory)
             obs, reward, done, _ = env.step(action)
             obs = wrap_obs(obs)
             if args.world_model_train:
@@ -203,12 +208,24 @@ def train(args):
             runstats.append(train_stats.compress())
             if not args.check_script:
                 wandb.log(runstats[-1])
+
+            true_real_grids = F.pad(torch.stack(world_model.true_real_grids, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_real_grids = F.pad(torch.stack(world_model.pred_real_grids, dim=0), (0, 0, 1, 1, 1, 1))
+            real_grids = torch.cat((true_real_grids, pred_real_grids), dim=2)
+            true_imag_grids = F.pad(torch.stack(world_model.true_imag_grids, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_imag_grids = F.pad(torch.stack(world_model.pred_imag_grids, dim=0), (0, 0, 1, 1, 1, 1))
+            imag_grids = torch.cat((true_imag_grids, pred_imag_grids), dim=2)
+            episodelog = {'step': train_stats.total_steps}
+            episodelog.update({f'real_{i}': wandb.Video((255*real_grids[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            episodelog.update({f'imag_{i}': wandb.Video((255*imag_grids[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            wandb.log(episodelog)
             
             if train_stats.compress()['win'] > max_train_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
                 max_train_win = train_stats.compress()['win']
                 
             train_stats.reset()
+        world_model.episode_logs_reset()
 
         # run evaluation
         if i_episode % args.eval_interval == 0:
