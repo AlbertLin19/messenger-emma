@@ -53,7 +53,9 @@ class WorldModel(nn.Module):
             self.pos_weight = 10*torch.ones(17, device=device)
             self.pos_weight[0] = 3 / 100
         elif self.loss_type == "cross_entropy":
-            self.pos_threshold = 0.2
+            self.pos_threshold = 0.4
+            self.cls_weight = torch.ones(17, device=device)
+            self.cls_weight[0] = 3 / 100
         else:
             raise NotImplementedError
 
@@ -99,7 +101,7 @@ class WorldModel(nn.Module):
             self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
             confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         elif self.loss_type == "cross_entropy":
-            self.real_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1))
+            self.real_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
             confusion = (F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         else:
             raise NotImplementedError
@@ -127,7 +129,7 @@ class WorldModel(nn.Module):
             self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
             confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         elif self.loss_type == "cross_entropy":
-            self.imag_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1))
+            self.imag_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
             confusion = (F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         else:
             raise NotImplementedError

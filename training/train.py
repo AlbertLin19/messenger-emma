@@ -308,8 +308,8 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--log_loss_interval', default=50, type=int, help='number of loss updates between logging')
-    parser.add_argument('--log_interval', default=5000, type=int, help='number of episodes between logging')
-    parser.add_argument('--eval_interval', default=25000, type=int, help='number of episodes between eval')
+    parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
+    parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
     parser.add_argument('--log_group', type=str, help="wandb log group")
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
