@@ -7,7 +7,7 @@ def convert_obs_to_multilabel(obs):
     return multilabel
 
 def convert_multilabel_to_emb(multilabel, text, world_model):
-    query = world_model.emma.sprite_emb(torch.arange(17, device=multilabel.device)) # 17 x sprite_emb_dim
+    query = world_model.emma.sprite_emb(torch.arange(17, device=world_model.device)) # 17 x sprite_emb_dim
 
     # Attention-based text representation        
     key = world_model.emma.txt_key(text)
@@ -36,7 +36,7 @@ def convert_multilabel_to_emb(multilabel, text, world_model):
     return torch.cat((key, value), dim=-1)
 
 def attend(text, world_model):
-    query = world_model.emma.sprite_emb(torch.arange(17, device=multilabel.device)) # 17 x sprite_emb_dim
+    query = world_model.emma.sprite_emb(torch.arange(17, device=world_model.device)) # 17 x sprite_emb_dim
 
     # Attention-based text representation        
     key = world_model.emma.txt_key(text)

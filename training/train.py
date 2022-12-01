@@ -226,14 +226,21 @@ def train(args):
             entity_descriptors = {entity.id: None for entity in NPCS}
             entity_names = {entity.id: entity.name for entity in NPCS}
             while None in entity_descriptors.values():
-                game = random.choice(env.cur_env.all_games)
-                variant = random.choice(env.cur_env.game_variants)
+                if hasattr(env, 'cur_env'):
+                    if random.random() < env.prob_env_1:
+                        cur_env = env.env_1 
+                    else:
+                        cur_env = env.env_2
+                else:
+                    cur_env = env
+                game = random.choice(cur_env.all_games)
+                variant = random.choice(cur_env.game_variants)
                 if entity_descriptors[game.enemy.id] is None:
-                    entity_descriptors[game.enemy.id] = env.cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p)
+                    entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p)
                 if entity_descriptors[game.message.id] is None:
-                    entity_descriptors[game.message.id] = env.cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p)
+                    entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p)
                 if entity_descriptors[game.goal.id] is None:
-                    entity_descriptors[game.goal.id] = env.cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p)
+                    entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p)
             
             ordered_entity_ids = []
             ordered_entity_descriptors = []
@@ -243,8 +250,9 @@ def train(args):
                     ordered_entity_ids.append(i)
                     ordered_entity_descriptors.append(entity_descriptors[i])
                     ordered_entity_names.append(entity_names[i])
-
-            attentions = attend(ordered_entity_descriptors, world_model)[ordered_entity_ids]
+            with torch.no_grad():
+                ordered_entity_descriptors = encoder.encode(ordered_entity_descriptors)
+                attentions = attend(ordered_entity_descriptors, world_model)[ordered_entity_ids].cpu()
             wandb.log({
                 'grounding': wandb.plot.confusion_matrix(probs=attentions, y_true=range(len(ordered_entity_ids)), class_names=ordered_entity_names)
             })
