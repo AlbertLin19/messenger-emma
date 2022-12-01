@@ -254,7 +254,8 @@ def train(args):
                 ordered_entity_descriptors = encoder.encode(ordered_entity_descriptors)
                 attentions = attend(ordered_entity_descriptors, world_model)[ordered_entity_ids].cpu()
             wandb.log({
-                'grounding': wandb.plot.confusion_matrix(probs=attentions, y_true=range(len(ordered_entity_ids)), class_names=ordered_entity_names)
+                'step': train_stats.total_steps,
+                'grounding': wandb.Image(attentions.unsqueeze(0))
             })
             
             if train_stats.compress()['win'] > max_train_win:
