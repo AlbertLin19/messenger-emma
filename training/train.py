@@ -12,6 +12,7 @@ import hashlib
 import gym
 import messenger # this needs to be imported even though its not used to register gym environment ids
 from messenger.models.utils import Encoder
+from messenger.envs.config import NPCS
 import torch
 import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
@@ -21,6 +22,7 @@ import numpy as np
 from model import TrainEMMA, Memory
 from train_tools import ObservationBuffer, PPO, TrainStats
 from world_model.model import WorldModel
+from world_model.utils import attend
 
 
 def wrap_obs(obs):
@@ -219,6 +221,33 @@ def train(args):
             episodelog.update({f'real_{i}': wandb.Video((255*real_grids[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
             episodelog.update({f'imag_{i}': wandb.Video((255*imag_grids[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
             wandb.log(episodelog)
+
+            entity_ids = [entity.id for entity in NPCS]
+            entity_descriptors = {entity.id: None for entity in NPCS}
+            entity_names = {entity.id: entity.name for entity in NPCS}
+            while None in entity_descriptors.values():
+                game = random.choice(env.cur_env.all_games)
+                variant = random.choice(env.cur_env.game_variants)
+                if entity_descriptors[game.enemy.id] is None:
+                    entity_descriptors[game.enemy.id] = env.cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p)
+                if entity_descriptors[game.message.id] is None:
+                    entity_descriptors[game.message.id] = env.cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p)
+                if entity_descriptors[game.goal.id] is None:
+                    entity_descriptors[game.goal.id] = env.cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p)
+            
+            ordered_entity_ids = []
+            ordered_entity_descriptors = []
+            ordered_entity_names = []
+            for i in range(17):
+                if i in entity_ids:
+                    ordered_entity_ids.append(i)
+                    ordered_entity_descriptors.append(entity_descriptors[i])
+                    ordered_entity_names.append(entity_names[i])
+
+            attentions = attend(ordered_entity_descriptors, world_model)[ordered_entity_ids]
+            wandb.log({
+                'grounding': wandb.plot.confusion_matrix(probs=attentions, y_true=range(len(ordered_entity_ids)), class_names=ordered_entity_names)
+            })
             
             if train_stats.compress()['win'] > max_train_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
