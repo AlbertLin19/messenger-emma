@@ -69,6 +69,42 @@ class WorldModel(nn.Module):
     def detect(self, emb):
         return self.detector(emb.permute(2, 0, 1)).permute(1, 2, 0)
         
+    def forward(self, multilabel, text, action, lstm_states):
+        latent = self.encode(convert_multilabel_to_emb(multilabel, text, self))
+        action = F.one_hot(torch.tensor(action, device=multilabel.device), num_classes=5)
+        lstm_in = torch.cat((latent, action), dim=-1).unsqueeze(0)
+        lstm_out, (hidden_state, cell_state) = self.lstm(lstm_in, lstm_states)
+        pred_latent = self.projection(lstm_out.squeeze(0))
+        pred_logit = self.detect(self.decode(pred_latent))
+        return pred_logit, (hidden_state, cell_state)
+
+    def loss(self, logit, prob):
+        if self.loss_type == "binary_cross_entropy":
+            loss = F.binary_cross_entropy_with_logits(logit, prob, pos_weight=self.pos_weight)   
+        elif self.loss_type == "cross_entropy":
+            loss = F.cross_entropy(logit.flatten(0, 1), prob.flatten(0, 1), weight=self.cls_weight)
+        else:
+            raise NotImplementedError
+        return loss
+
+    def logit_to_prob(self, logit):
+        if self.loss_type == "binary_cross_entropy":
+            prob = torch.sigmoid(logit)
+        elif self.loss_type == "cross_entropy":
+            prob = F.softmax(logit, dim=-1)
+        else:
+            raise NotImplementedError
+        return prob
+
+    def multilabel_to_prob(self, multilabel):
+        if self.loss_type == "binary_cross_entropy":
+            prob = multilabel.float()
+        elif self.loss_type == "cross_entropy":
+            prob = multilabel / multilabel.sum(dim=-1, keepdim=True)
+        else:
+            raise NotImplementedError
+        return prob
+        
     def real_state_reset(self, init_obs):
         self.real_hidden_state = torch.zeros((1, self.hidden_size), device=self.device)
         self.real_cell_state = torch.zeros((1, self.hidden_size), device=self.device)
@@ -92,76 +128,43 @@ class WorldModel(nn.Module):
     def real_step(self, old_obs, text, action, obs):
         old_multilabel = convert_obs_to_multilabel(old_obs)
         multilabel = convert_obs_to_multilabel(obs)
+        prob = self.multilabel_to_prob(multilabel)
 
-        old_latent = self.encode(convert_multilabel_to_emb(old_multilabel, text, self))
-        action = F.one_hot(torch.tensor(action, device=obs.device), num_classes=5)
-        lstm_in = torch.cat((old_latent, action), dim=-1).unsqueeze(0)
-        lstm_out, (self.real_hidden_state, self.real_cell_state) = self.lstm(lstm_in, (self.real_hidden_state, self.real_cell_state))
-        latent = self.projection(lstm_out.squeeze(0))
-        pred_multilabel_logit = self.detect(self.decode(latent))
+        pred_logit, (self.real_hidden_state, self.real_cell_state) = self.forward(old_multilabel, text, action, (self.real_hidden_state, self.real_cell_state))
 
-        if self.loss_type == "binary_cross_entropy":
-            pred_multilabel_prob = torch.sigmoid(pred_multilabel_logit)
-        elif self.loss_type == "cross_entropy":
-            pred_multilabel_prob = F.softmax(pred_multilabel_logit, dim=-1)
-        else:
-            raise NotImplementedError
-        pred_multilabel = convert_prob_to_multilabel(pred_multilabel_prob, self.real_entity_ids)
+        pred_prob = self.logit_to_prob(pred_logit)
+        pred_multilabel = convert_prob_to_multilabel(pred_prob, self.real_entity_ids)
         confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
 
-        if self.loss_type == "binary_cross_entropy":
-            true_grid = multilabel.cpu() 
-            pred_grid = torch.sigmoid(pred_multilabel_logit).detach().cpu()
-            self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)   
-        elif self.loss_type == "cross_entropy":
-            true_grid = (multilabel / multilabel.sum(dim=-1, keepdim=True)).cpu()
-            pred_grid = torch.softmax(pred_multilabel_logit, dim=-1).detach().cpu()
-            self.real_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
-        else:
-            raise NotImplementedError
-        self.true_real_grids.append(true_grid)
-        self.pred_real_grids.append(pred_grid)
+        self.real_loss += self.loss(pred_logit, prob)
+
+        self.true_real_grids.append(prob.detach().cpu())
+        self.pred_real_grids.append(pred_prob.detach().cpu())
         self.pred_real_multilabels.append(pred_multilabel.detach().cpu())
 
     def imag_step(self, text, action, obs):
+        old_multilabel = self.imag_old_multilabel
         multilabel = convert_obs_to_multilabel(obs)
+        prob = self.multilabel_to_prob(multilabel)
 
-        old_latent = self.encode(convert_multilabel_to_emb(self.imag_old_multilabel, text, self))
-        action = F.one_hot(torch.tensor(action, device=obs.device), num_classes=5)
-        lstm_in = torch.cat((old_latent, action), dim=-1).unsqueeze(0)
-        lstm_out, (self.imag_hidden_state, self.imag_cell_state) = self.lstm(lstm_in, (self.imag_hidden_state, self.imag_cell_state))
-        latent = self.projection(lstm_out.squeeze(0))
-        pred_multilabel_logit = self.detect(self.decode(latent))
+        pred_logit, (self.imag_hidden_state, self.imag_cell_state) = self.forward(old_multilabel, text, action, (self.imag_hidden_state, self.imag_cell_state))
 
-        if self.loss_type == "binary_cross_entropy":
-            pred_multilabel_prob = torch.sigmoid(pred_multilabel_logit)
-        elif self.loss_type == "cross_entropy":
-            pred_multilabel_prob = F.softmax(pred_multilabel_logit, dim=-1)
-        else:
-            raise NotImplementedError
-        pred_multilabel = convert_prob_to_multilabel(pred_multilabel_prob, self.imag_entity_ids)
+        pred_prob = self.logit_to_prob(pred_logit)
+        pred_multilabel = convert_prob_to_multilabel(pred_prob, self.imag_entity_ids)
         confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
+
+        self.imag_loss += self.loss(pred_logit, prob)
         
-        if self.loss_type == "binary_cross_entropy":
-            true_grid = multilabel.cpu()
-            pred_grid = torch.sigmoid(pred_multilabel_logit).detach().cpu()
-            self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
-        elif self.loss_type == "cross_entropy":
-            true_grid = (multilabel / multilabel.sum(dim=-1, keepdim=True)).cpu()
-            pred_grid = torch.softmax(pred_multilabel_logit, dim=-1).detach().cpu()
-            self.imag_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
-        else:
-            raise NotImplementedError
-        self.true_imag_grids.append(true_grid)
-        self.pred_imag_grids.append(pred_grid)
+        self.true_imag_grids.append(prob.detach().cpu())
+        self.pred_imag_grids.append(pred_prob.detach().cpu())
         self.pred_imag_multilabels.append(pred_multilabel.detach().cpu())
         self.imag_old_multilabel = pred_multilabel
 
