@@ -58,13 +58,7 @@ class WorldModel(nn.Module):
         else:
             raise NotImplementedError
 
-        # EPISODE LOGGING
-        self.true_real_grids = []
-        self.true_imag_grids = []
-        self.pred_real_grids = []
-        self.pred_real_multilabels = []
-        self.pred_imag_grids = []
-        self.pred_imag_multilabels = []
+        self.episode_logs_reset()
 
     def encode(self, emb):
         return self.encoder(emb.permute(2, 0, 1))
@@ -243,5 +237,7 @@ class WorldModel(nn.Module):
         self.true_real_grids = []
         self.true_imag_grids = []
         self.pred_real_grids = []
+        self.pred_real_multilabels = []
         self.pred_imag_grids = []
+        self.pred_imag_multilabels = []
     
