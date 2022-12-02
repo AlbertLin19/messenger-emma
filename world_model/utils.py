@@ -27,11 +27,12 @@ def convert_multilabel_to_emb(multilabel, text, world_model):
     weights = F.softmax(kq, dim=-1) * mask # (17 x num sent)
     values = torch.mean(weights.unsqueeze(-1) * value, dim=-2) # (17 x val_emb_dim)
 
-    values = values*multilabel[..., None] # (10 x 10 x 17 x val_emb_dim)
-    value = torch.sum(values, dim=-2) / torch.sum(multilabel, dim=-1, keepdim=True)
-
     keys = query*multilabel[..., None] # (10 x 10 x 17 x key_emb_dim)
     key = torch.sum(keys, dim=-2) / torch.sum(multilabel, dim=-1, keepdim=True)
+
+    values[15:17] = query[15:17]
+    values = values*multilabel[..., None] # (10 x 10 x 17 x val_emb_dim)
+    value = torch.sum(values, dim=-2) / torch.sum(multilabel, dim=-1, keepdim=True)
 
     return torch.cat((key, value), dim=-1)
 
