@@ -62,7 +62,9 @@ class WorldModel(nn.Module):
         self.true_real_grids = []
         self.true_imag_grids = []
         self.pred_real_grids = []
+        self.pred_real_multilabels = []
         self.pred_imag_grids = []
+        self.pred_imag_multilabels = []
 
     def encode(self, emb):
         return self.encoder(emb.permute(2, 0, 1))
@@ -129,6 +131,7 @@ class WorldModel(nn.Module):
             raise NotImplementedError
         self.true_real_grids.append(true_grid)
         self.pred_real_grids.append(pred_grid)
+        self.pred_real_multilabels.append(pred_multilabel.detach().cpu())
 
     def imag_step(self, text, action, obs):
         multilabel = convert_obs_to_multilabel(obs)
@@ -165,6 +168,7 @@ class WorldModel(nn.Module):
             raise NotImplementedError
         self.true_imag_grids.append(true_grid)
         self.pred_imag_grids.append(pred_grid)
+        self.pred_imag_multilabels.append(pred_multilabel.detach().cpu())
         self.imag_old_multilabel = pred_multilabel
 
     def real_loss_update(self):
