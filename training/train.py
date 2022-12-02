@@ -127,7 +127,7 @@ def train(args):
         text = encoder.encode(text)
         buffer.reset(obs)
         if args.world_model_train:
-            world_model.real_state_reset()
+            world_model.real_state_reset(tensor_obs)
             world_model.imag_state_reset(tensor_obs)
 
         # Episode loop

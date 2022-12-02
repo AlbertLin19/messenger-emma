@@ -4,7 +4,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 
 from world_model.modules import Encoder, Decoder
-from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb
+from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
 
 class WorldModel(nn.Module):
     def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, device):
@@ -53,7 +53,6 @@ class WorldModel(nn.Module):
             self.pos_weight = 10*torch.ones(17, device=device)
             self.pos_weight[0] = 3 / 100
         elif self.loss_type == "cross_entropy":
-            self.pos_threshold = 0.4
             self.cls_weight = torch.ones(17, device=device)
             self.cls_weight[0] = 3 / 100
         else:
@@ -74,14 +73,16 @@ class WorldModel(nn.Module):
     def detect(self, emb):
         return self.detector(emb.permute(2, 0, 1)).permute(1, 2, 0)
         
-    def real_state_reset(self):
+    def real_state_reset(self, init_obs):
         self.real_hidden_state = torch.zeros((1, self.hidden_size), device=self.device)
         self.real_cell_state = torch.zeros((1, self.hidden_size), device=self.device)
+        self.real_entity_ids = torch.max(init_obs[..., :-1].flatten(start_dim=0, end_dim=1), dim=0).values
 
     def imag_state_reset(self, init_obs):
         self.imag_hidden_state = torch.zeros((1, self.hidden_size), device=self.device)
         self.imag_cell_state = torch.zeros((1, self.hidden_size), device=self.device)
         self.imag_old_multilabel = convert_obs_to_multilabel(init_obs)
+        self.imag_entity_ids = torch.max(init_obs[..., :-1].flatten(start_dim=0, end_dim=1), dim=0).values
 
     def real_state_detach(self):
         self.real_hidden_state = self.real_hidden_state.detach()
@@ -104,25 +105,26 @@ class WorldModel(nn.Module):
         pred_multilabel_logit = self.detect(self.decode(latent))
 
         if self.loss_type == "binary_cross_entropy":
-            self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
-            confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            pred_multilabel_prob = torch.sigmoid(pred_multilabel_logit)
         elif self.loss_type == "cross_entropy":
-            self.real_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
-            confusion = (F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            pred_multilabel_prob = F.softmax(pred_multilabel_logit, dim=-1)
         else:
             raise NotImplementedError
+        pred_multilabel = convert_prob_to_multilabel(pred_multilabel_prob, self.real_entity_ids)
+        confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
 
-        # EPISODE LOGGING
         if self.loss_type == "binary_cross_entropy":
             true_grid = multilabel.cpu() 
             pred_grid = torch.sigmoid(pred_multilabel_logit).detach().cpu()
+            self.real_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)   
         elif self.loss_type == "cross_entropy":
             true_grid = (multilabel / multilabel.sum(dim=-1, keepdim=True)).cpu()
             pred_grid = torch.softmax(pred_multilabel_logit, dim=-1).detach().cpu()
+            self.real_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
         else:
             raise NotImplementedError
         self.true_real_grids.append(true_grid)
@@ -139,34 +141,31 @@ class WorldModel(nn.Module):
         pred_multilabel_logit = self.detect(self.decode(latent))
 
         if self.loss_type == "binary_cross_entropy":
-            self.imag_old_multilabel = 1*(pred_multilabel_logit > 0)
+            pred_multilabel_prob = torch.sigmoid(pred_multilabel_logit)
         elif self.loss_type == "cross_entropy":
-            self.imag_old_multilabel = 1*(F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold)
-
-        if self.loss_type == "binary_cross_entropy":
-            self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
-            confusion = (pred_multilabel_logit > 0) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
-        elif self.loss_type == "cross_entropy":
-            self.imag_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
-            confusion = (F.softmax(pred_multilabel_logit, dim=-1) >= self.pos_threshold) / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            pred_multilabel_prob = F.softmax(pred_multilabel_logit, dim=-1)
         else:
             raise NotImplementedError
+        pred_multilabel = convert_prob_to_multilabel(pred_multilabel_prob, self.imag_entity_ids)
+        confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
         self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
-
-        # EPISODE LOGGING
+        
         if self.loss_type == "binary_cross_entropy":
             true_grid = multilabel.cpu()
             pred_grid = torch.sigmoid(pred_multilabel_logit).detach().cpu()
+            self.imag_loss += F.binary_cross_entropy_with_logits(pred_multilabel_logit, multilabel.float(), pos_weight=self.pos_weight)
         elif self.loss_type == "cross_entropy":
             true_grid = (multilabel / multilabel.sum(dim=-1, keepdim=True)).cpu()
             pred_grid = torch.softmax(pred_multilabel_logit, dim=-1).detach().cpu()
+            self.imag_loss += F.cross_entropy(pred_multilabel_logit.flatten(0, 1), (multilabel / multilabel.sum(dim=-1, keepdim=True)).flatten(0, 1), weight=self.cls_weight)
         else:
             raise NotImplementedError
         self.true_imag_grids.append(true_grid)
         self.pred_imag_grids.append(pred_grid)
+        self.imag_old_multilabel = pred_multilabel
 
     def real_loss_update(self):
         self.optimizer.zero_grad()
