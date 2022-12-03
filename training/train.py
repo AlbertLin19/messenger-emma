@@ -379,8 +379,8 @@ def train(args):
                 
                 real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
                 imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
-                evallog.update(real_loss_and_metrics)
-                evallog.update(imag_loss_and_metrics)
+                evallog.update({f'val_{key}': value for key, value in real_loss_and_metrics.items()})
+                evallog.update({f'val_{key}': value for key, value in imag_loss_and_metrics.items()})
 
                 true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
                 pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
