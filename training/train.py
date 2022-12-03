@@ -329,7 +329,7 @@ def train(args):
                 obs = wrap_obs(obs)
                 if args.world_model_train:
                     tensor_obs = torch.from_numpy(obs).long().to(args.device)
-                text = encoder.encode(text)
+                text, _ = encoder.encode(text)
                 buffer.reset(obs)
                 if args.world_model_train:
                     world_model.real_state_reset(tensor_obs)
@@ -347,7 +347,7 @@ def train(args):
                         tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
                     # World model predictions
-                    if args.world_model_train:
+                    if args.world_model_train and eval_episode < args.eval_world_model_metrics_eps:
                         with torch.no_grad():
                             world_model.real_step(old_tensor_obs, text, action, tensor_obs)
                             world_model.imag_step(text, action, tensor_obs)
@@ -361,7 +361,7 @@ def train(args):
                         break
                     buffer.update(obs)
 
-                    if eval_episode < args.eval_eps - args.eval_vis_eps:
+                    if eval_episode < args.eval_eps - args.eval_world_model_vis_eps:
                         world_model.vis_logs_reset()
                 eval_stats.end_of_episode()
 
@@ -525,7 +525,8 @@ if __name__ == "__main__":
     parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
     parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
-    parser.add_argument('--eval_vis_eps', default=5, type=int, help='number of episodes to run vis eval')
+    parser.add_argument('--eval_world_model_vis_eps', default=5, type=int, help='number of episodes to run world model vis eval')
+    parser.add_argument('--eval_world_model_metrics_eps', default=50, type=int, help='number of episodes to run world model metrics eval')
     parser.add_argument('--log_group', type=str, help="wandb log group")
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
