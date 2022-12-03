@@ -347,7 +347,7 @@ def train(args):
                         tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
                     # World model predictions
-                    if args.world_model_train and eval_episode < args.eval_world_model_metrics_eps:
+                    if args.world_model_train and (eval_episode >= (args.eval_eps - args.eval_world_model_metrics_eps)):
                         with torch.no_grad():
                             world_model.real_step(old_tensor_obs, text, action, tensor_obs)
                             world_model.imag_step(text, action, tensor_obs)
@@ -361,8 +361,8 @@ def train(args):
                         break
                     buffer.update(obs)
 
-                    if eval_episode < args.eval_eps - args.eval_world_model_vis_eps:
-                        world_model.vis_logs_reset()
+                if args.world_model_train and (eval_episode < (args.eval_eps - args.eval_world_model_vis_eps)):
+                    world_model.vis_logs_reset()
                 eval_stats.end_of_episode()
 
             ppo.policy_old.train()
@@ -532,6 +532,8 @@ if __name__ == "__main__":
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
 
     args = parser.parse_args()
+
+    assert args.eval_world_model_metrics_eps >= args.eval_world_model_vis_eps
     
     # get hash of arguments minus seed
     args_dict = vars(args).copy()

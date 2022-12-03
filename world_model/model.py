@@ -46,6 +46,9 @@ class WorldModel(nn.Module):
         self.imag_fp = torch.zeros(17, dtype=int, device=device)
         self.imag_tn = torch.zeros(17, dtype=int, device=device)
 
+        self.real_dists = []
+        self.imag_dists = []
+
         self.device = device
 
         self.loss_type = loss_type
@@ -146,6 +149,17 @@ class WorldModel(nn.Module):
         self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
 
+        dist = 0
+        for sprite_id in range(17):
+            if torch.any(multilabel[..., sprite_id]):
+                pos = torch.nonzero(multilabel[..., sprite_id])[0]
+                if torch.any(pred_multilabel[..., sprite_id]):
+                    pred_pos = torch.nonzero(pred_multilabel[..., sprite_id])
+                    dist += torch.max(torch.sum(torch.abs(pos - pred_pos), dim=-1))
+                else:
+                    dist += torch.sum(torch.maximum(pos, 9 - pos))
+        self.real_dists.append(dist)
+
     def imag_step(self, text, action, obs):
         old_multilabel = self.imag_old_multilabel
         multilabel = convert_obs_to_multilabel(obs)
@@ -167,6 +181,17 @@ class WorldModel(nn.Module):
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
+
+        dist = 0
+        for sprite_id in range(17):
+            if torch.any(multilabel[..., sprite_id]):
+                pos = torch.nonzero(multilabel[..., sprite_id])[0]
+                if torch.any(pred_multilabel[..., sprite_id]):
+                    pred_pos = torch.nonzero(pred_multilabel[..., sprite_id])
+                    dist += torch.max(torch.sum(torch.abs(pos - pred_pos), dim=-1))
+                else:
+                    dist += torch.sum(torch.maximum(pos, 9 - pos))
+        self.imag_dists.append(dist)
 
     def real_loss_update(self):
         self.optimizer.zero_grad()
@@ -199,12 +224,14 @@ class WorldModel(nn.Module):
         metrics.update({f'real_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'real_precision_{i}': precision[i] for i in range(len(precision))})
         metrics.update({f'real_f1_{i}': f1[i] for i in range(len(f1))})
+        metrics.update({'real_distance': sum(self.real_dists)/len(self.real_dists)})
         
         self.real_loss = 0
         self.real_tp = torch.zeros(17, dtype=int, device=self.device)
         self.real_fn = torch.zeros(17, dtype=int, device=self.device)
         self.real_fp = torch.zeros(17, dtype=int, device=self.device)
         self.real_tn = torch.zeros(17, dtype=int, device=self.device)
+        self.real_dists = []
 
         return metrics
 
@@ -227,12 +254,14 @@ class WorldModel(nn.Module):
         metrics.update({f'imag_recall_{i}': recall[i] for i in range(len(recall))})
         metrics.update({f'imag_precision_{i}': precision[i] for i in range(len(precision))})
         metrics.update({f'imag_f1_{i}': f1[i] for i in range(len(f1))})
+        metrics.update({'imag_distance': sum(self.imag_dists)/len(self.imag_dists)})
         
         self.imag_loss = 0
         self.imag_tp = torch.zeros(17, dtype=int, device=self.device)
         self.imag_fn = torch.zeros(17, dtype=int, device=self.device)
         self.imag_fp = torch.zeros(17, dtype=int, device=self.device)
         self.imag_tn = torch.zeros(17, dtype=int, device=self.device)
+        self.imag_dists = []
 
         return metrics
 
