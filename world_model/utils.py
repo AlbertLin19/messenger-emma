@@ -37,7 +37,7 @@ def convert_multilabel_to_emb(multilabel, text, world_model):
     return torch.cat((key, value), dim=-1)
 
 def ground(text, emma):
-    query = emma.sprite_emb(torch.arange(17, device=emma.device)) # 17 x sprite_emb_dim
+    query = emma.sprite_emb(torch.arange(17, device=text.device)) # 17 x sprite_emb_dim
 
     # Attention-based text representation        
     key = emma.txt_key(text)
@@ -51,6 +51,15 @@ def ground(text, emma):
     weights = F.softmax(kq, dim=-1) * mask # (17 x num sent)
     
     return weights
+
+def key_attend(text, emma):
+    # Attention-based text representation        
+    key_scale = emma.scale_key(text) # (num sent, sent_len, 1)
+    return key_scale
+
+def value_attend(text, emma):
+    val_scale = emma.scale_val(text)
+    return val_scale
 
 def convert_prob_to_multilabel(prob, entity_ids):
     multilabel = torch.zeros((10, 10, 17), device=prob.device)

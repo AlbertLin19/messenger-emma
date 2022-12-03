@@ -61,6 +61,7 @@ class Encoder:
         self.device = device
         self.max_length = max_length # max sentence length
         self.cache = {}
+        self.tokens_cache = {}
 
     def to(self, device):
         self.device = device
@@ -79,9 +80,11 @@ class Encoder:
         a list of sents, where sent is a string.
         '''
         encoded = [] # the final encoded texts
+        tokenized = [] # the corresponding tokens
         for sent in text:
             if sent in self.cache.keys(): # sentence is in cache
                 encoded.append(self.cache[sent])
+                tokenized.append(self.tokens_cache[sent])
             else: 
                 with torch.no_grad():
                     tokens = self.tokenizer(
@@ -93,9 +96,12 @@ class Encoder:
                         max_length=self.max_length
                     )
                     emb = self.encoder(**self.tokens_to_device(tokens)).last_hidden_state
+                    tokens = self.tokenizer.convert_ids_to_tokens(tokens.input_ids[0])
                 encoded.append(emb)
+                tokenized.append(tokens)
                 self.cache[sent] = emb
-        return torch.cat(encoded, dim=0)
+                self.tokens_cache[sent] = tokens
+        return torch.cat(encoded, dim=0), tokenized
 
 def nonzero_mean(emb):
     '''

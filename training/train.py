@@ -22,7 +22,7 @@ import numpy as np
 from model import TrainEMMA, Memory
 from train_tools import ObservationBuffer, PPO, TrainStats
 from world_model.model import WorldModel
-from world_model.utils import ground
+from world_model.utils import ground, key_attend, value_attend
 
 
 def wrap_obs(obs):
@@ -137,14 +137,14 @@ def train(args):
         [85, 0, 255], # 14
         [170, 0, 255], # 15
         [255, 0, 255], # 16
-    ], device=args.device)
+    ])
 
     while True: # main training loop
         obs, text = env.reset(no_type_p=args.no_type_p)
         obs = wrap_obs(obs)
         if args.world_model_train:
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
-        text = encoder.encode(text)
+        text, _ = encoder.encode(text)
         buffer.reset(obs)
         if args.world_model_train:
             world_model.real_state_reset(tensor_obs)
@@ -242,7 +242,7 @@ def train(args):
             pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
             real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
             episodelog.update({f'real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-            episodelog.update({'real_multilabels': wandb.Video(torch.mean(real_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+            episodelog.update({'real_multilabels': wandb.Video(torch.min(torch.sum(real_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
             true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
             pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
@@ -254,7 +254,7 @@ def train(args):
             pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
             imag_multilabels = torch.cat((true_imag_multilabels, pred_imag_multilabels), dim=2)
             episodelog.update({f'imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-            episodelog.update({'imag_multilabels': wandb.Video(torch.mean(imag_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+            episodelog.update({'imag_multilabels': wandb.Video(torch.min(torch.sum(imag_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
             wandb.log(episodelog)
 
@@ -287,13 +287,26 @@ def train(args):
                     ordered_entity_descriptors.append(entity_descriptors[i])
                     ordered_entity_names.append(entity_names[i])
             with torch.no_grad():
-                ordered_entity_descriptors = encoder.encode(ordered_entity_descriptors)
+                ordered_entity_descriptors, ordered_entity_tokens = encoder.encode(ordered_entity_descriptors)
+
+                policy_key_attention = key_attend(ordered_entity_descriptors, ppo.policy).squeeze(-1).cpu()
+                policy_value_attention = value_attend(ordered_entity_descriptors, ppo.policy).squeeze(-1).cpu()
                 policy_grounding = ground(ordered_entity_descriptors, ppo.policy)[ordered_entity_ids].cpu()
+
+                world_model_key_attention = key_attend(ordered_entity_descriptors, world_model.emma).squeeze(-1).cpu()
+                world_model_value_attention = value_attend(ordered_entity_descriptors, world_model).squeeze(-1).cpu()
                 world_model_grounding = ground(ordered_entity_descriptors, world_model.emma)[ordered_entity_ids].cpu()
+
+                attention_table = []
+                for i in range(len(ordered_entity_tokens)):
+                    for j in range(len(ordered_entity_tokens[i])):
+                        attention_table.append([train_stats.total_steps, ordered_entity_tokens[i][j], policy_key_attention[i, j].item(), policy_value_attention[i, j].item(), world_model_key_attention[i, j].item(), world_model_value_attention[i, j].item()])
+
             wandb.log({
                 'step': train_stats.total_steps,
                 'policy_grounding': wandb.Image(policy_grounding.unsqueeze(0)),
-                'world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0))
+                'world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0)),
+                'token_attention': wandb.Table(columns=["step", "token", "policy_key", "policy_value", "world_model_key", "world_model_value"], data=attention_table)
             })
             
             if train_stats.compress()['win'] > max_train_win:
