@@ -385,29 +385,80 @@ def train(args):
                 true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
                 pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
                 real_probs = torch.cat((true_real_probs, pred_real_probs), dim=2)
-                evallog.update({f'real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+                evallog.update({f'val_real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'val_real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
 
                 true_real_multilabels = F.pad(torch.stack(world_model.true_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
                 pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
                 real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
-                evallog.update({f'real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'real_multilabels': wandb.Video(torch.mean(real_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+                evallog.update({f'val_real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'val_real_multilabels': wandb.Video(torch.min(torch.sum(real_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
                 true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
                 pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
                 imag_probs = torch.cat((true_imag_probs, pred_imag_probs), dim=2)
-                evallog.update({f'imag_prob_{i}': wandb.Video((255*imag_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'imag_probs': wandb.Video(torch.sum(imag_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+                evallog.update({f'val_imag_prob_{i}': wandb.Video((255*imag_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'val_imag_probs': wandb.Video(torch.sum(imag_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
 
                 true_imag_multilabels = F.pad(torch.stack(world_model.true_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
                 pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
                 imag_multilabels = torch.cat((true_imag_multilabels, pred_imag_multilabels), dim=2)
-                evallog.update({f'imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'imag_multilabels': wandb.Video(torch.mean(imag_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+                evallog.update({f'val_imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'val_imag_multilabels': wandb.Video(torch.min(torch.sum(imag_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
                 wandb.log(evallog)
 
+                entity_ids = [entity.id for entity in NPCS]
+                entity_descriptors = {entity.id: None for entity in NPCS}
+                entity_names = {entity.id: entity.name for entity in NPCS}
+                while None in entity_descriptors.values():
+                    if hasattr(eval_env, 'cur_env'):
+                        if random.random() < eval_env.prob_env_1:
+                            cur_env = eval_env.env_1 
+                        else:
+                            cur_env = eval_env.env_2
+                    else:
+                        cur_env = eval_env
+                    game = random.choice(cur_env.all_games)
+                    variant = random.choice(cur_env.game_variants)
+                    if entity_descriptors[game.enemy.id] is None:
+                        entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p)
+                    if entity_descriptors[game.message.id] is None:
+                        entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p)
+                    if entity_descriptors[game.goal.id] is None:
+                        entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p)
+                
+                ordered_entity_ids = []
+                ordered_entity_descriptors = []
+                ordered_entity_names = []
+                for i in range(17):
+                    if i in entity_ids:
+                        ordered_entity_ids.append(i)
+                        ordered_entity_descriptors.append(entity_descriptors[i])
+                        ordered_entity_names.append(entity_names[i])
+                with torch.no_grad():
+                    ordered_entity_descriptors, ordered_entity_tokens = encoder.encode(ordered_entity_descriptors)
+
+                    policy_key_attention = key_attend(ordered_entity_descriptors, ppo.policy).squeeze(-1).cpu()
+                    policy_value_attention = value_attend(ordered_entity_descriptors, ppo.policy).squeeze(-1).cpu()
+                    policy_grounding = ground(ordered_entity_descriptors, ppo.policy)[ordered_entity_ids].cpu()
+
+                    world_model_key_attention = key_attend(ordered_entity_descriptors, world_model.emma).squeeze(-1).cpu()
+                    world_model_value_attention = value_attend(ordered_entity_descriptors, world_model).squeeze(-1).cpu()
+                    world_model_grounding = ground(ordered_entity_descriptors, world_model.emma)[ordered_entity_ids].cpu()
+
+                    attention_table = []
+                    for i in range(len(ordered_entity_tokens)):
+                        for j in range(len(ordered_entity_tokens[i])):
+                            attention_table.append([train_stats.total_steps, ordered_entity_tokens[i][j], policy_key_attention[i, j].item(), policy_value_attention[i, j].item(), world_model_key_attention[i, j].item(), world_model_value_attention[i, j].item()])
+
+                wandb.log({
+                    'step': train_stats.total_steps,
+                    'val_policy_grounding': wandb.Image(policy_grounding.unsqueeze(0)),
+                    'val_world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0)),
+                    'val_token_attention': wandb.Table(columns=["step", "token", "policy_key", "policy_value", "world_model_key", "world_model_value"], data=attention_table)
+                })
+                
             if eval_stats.compress()['val_win'] > max_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_max.pth")
                 torch.save(world_model.state_dict(), args.output + "_worldmodel_max.pth")
