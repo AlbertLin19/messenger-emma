@@ -36,18 +36,18 @@ def convert_multilabel_to_emb(multilabel, text, world_model):
 
     return torch.cat((key, value), dim=-1)
 
-def attend(text, world_model):
-    query = world_model.emma.sprite_emb(torch.arange(17, device=world_model.device)) # 17 x sprite_emb_dim
+def ground(text, emma):
+    query = emma.sprite_emb(torch.arange(17, device=emma.device)) # 17 x sprite_emb_dim
 
     # Attention-based text representation        
-    key = world_model.emma.txt_key(text)
-    key_scale = world_model.emma.scale_key(text) # (num sent, sent_len, 1)
+    key = emma.txt_key(text)
+    key_scale = emma.scale_key(text) # (num sent, sent_len, 1)
     key = key * key_scale
     key = torch.sum(key, dim=1) # num sent x key_emb_dim
     
     kq = query @ key.t() # dot product attention (17 x num sent)
     mask = (kq != 0) # keep zeroed-out entries zero
-    kq = kq / world_model.emma.attn_scale # scale to prevent vanishing grads
+    kq = kq / emma.attn_scale # scale to prevent vanishing grads
     weights = F.softmax(kq, dim=-1) * mask # (17 x num sent)
     
     return weights

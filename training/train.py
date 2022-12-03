@@ -22,7 +22,7 @@ import numpy as np
 from model import TrainEMMA, Memory
 from train_tools import ObservationBuffer, PPO, TrainStats
 from world_model.model import WorldModel
-from world_model.utils import attend
+from world_model.utils import ground
 
 
 def wrap_obs(obs):
@@ -288,10 +288,12 @@ def train(args):
                     ordered_entity_names.append(entity_names[i])
             with torch.no_grad():
                 ordered_entity_descriptors = encoder.encode(ordered_entity_descriptors)
-                attentions = attend(ordered_entity_descriptors, world_model)[ordered_entity_ids].cpu()
+                policy_grounding = ground(ordered_entity_descriptors, ppo.policy)[ordered_entity_ids].cpu()
+                world_model_grounding = ground(ordered_entity_descriptors, world_model.emma)[ordered_entity_ids].cpu()
             wandb.log({
                 'step': train_stats.total_steps,
-                'grounding': wandb.Image(attentions.unsqueeze(0))
+                'policy_grounding': wandb.Image(policy_grounding.unsqueeze(0)),
+                'world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0))
             })
             
             if train_stats.compress()['win'] > max_train_win:
