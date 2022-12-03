@@ -58,7 +58,7 @@ class WorldModel(nn.Module):
         else:
             raise NotImplementedError
 
-        self.episode_logs_reset()
+        self.vis_logs_reset()
 
     def encode(self, emb):
         return self.encoder(emb.permute(2, 0, 1))
@@ -236,7 +236,7 @@ class WorldModel(nn.Module):
 
         return metrics
 
-    def episode_logs_reset(self):
+    def vis_logs_reset(self):
         self.true_real_probs = []
         self.pred_real_probs = []
         self.true_real_multilabels = []

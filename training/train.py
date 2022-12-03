@@ -119,6 +119,26 @@ def train(args):
     # used to switch phases of training policy and world model, if specified
     policy_phase = True
 
+    colors = torch.tensor([
+        [0, 0, 0], # 0
+        [255, 0, 0], # 1
+        [255, 85, 0], # 2
+        [255, 170, 0], # 3
+        [255, 255, 0], # 4
+        [170, 255, 0], # 5
+        [85, 255, 0], # 6
+        [0, 255, 0], # 7
+        [0, 255, 85], # 8
+        [0, 255, 170], # 9
+        [0, 255, 255], # 10
+        [0, 170, 255], # 11
+        [0, 85, 255], # 12
+        [0, 0, 255], # 13
+        [85, 0, 255], # 14
+        [170, 0, 255], # 15
+        [255, 0, 255], # 16
+    ], device=args.device)
+
     while True: # main training loop
         obs, text = env.reset(no_type_p=args.no_type_p)
         obs = wrap_obs(obs)
@@ -134,7 +154,6 @@ def train(args):
         for t in range(args.max_steps):
             timestep += 1
 
-            old_obs = obs
             if args.world_model_train:
                 old_tensor_obs = tensor_obs
 
@@ -172,7 +191,7 @@ def train(args):
                 updatestep += 1
                 if args.world_model_train:
                     if not args.world_model_train_alternatingly or not policy_phase:
-                        world_model_loss = world_model.real_loss_update()
+                        world_model.real_loss_update()
                     world_model.real_state_detach()
                     world_model.imag_state_detach()
                     real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
@@ -185,7 +204,6 @@ def train(args):
                 if updatestep % args.log_loss_interval == 0:
                     updatelog = {'step': train_stats.total_steps}
                     if args.world_model_train:
-                        updatelog.update({'world_model_loss': world_model_loss})
                         updatelog.update(real_loss_and_metrics)
                         updatelog.update(imag_loss_and_metrics)
                     if not args.freeze_policy:
@@ -278,10 +296,11 @@ def train(args):
             
             if train_stats.compress()['win'] > max_train_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
+                torch.save(world_model.state_dict(), args.output + "_worldmodel_maxtrain.pth")
                 max_train_win = train_stats.compress()['win']
                 
             train_stats.reset()
-        world_model.episode_logs_reset()
+        world_model.vis_logs_reset()
 
         # run evaluation
         if i_episode % args.eval_interval == 0:
@@ -290,18 +309,34 @@ def train(args):
             if args.world_model_train:
                 world_model.eval()
 
-            for _ in range(args.eval_eps):
+            for eval_episode in range(args.eval_eps):
                 obs, text = eval_env.reset(no_type_p=args.no_type_p)
                 obs = wrap_obs(obs)
+                if args.world_model_train:
+                    tensor_obs = torch.from_numpy(obs).long().to(args.device)
                 text = encoder.encode(text)
                 buffer.reset(obs)
+                if args.world_model_train:
+                    world_model.real_state_reset(tensor_obs)
+                    world_model.imag_state_reset(tensor_obs)
 
                 # Running policy_old:
                 for t in range(args.max_steps):
+                    if args.world_model_train:
+                        old_tensor_obs = tensor_obs
                     with torch.no_grad():
                         action = ppo.policy_old.act(buffer.get_obs(), text, None)
                     obs, reward, done, _ = eval_env.step(action)
                     obs = wrap_obs(obs)
+                    if args.world_model_train:
+                        tensor_obs = torch.from_numpy(obs).long().to(args.device)
+
+                    # World model predictions
+                    if args.world_model_train:
+                        with torch.no_grad():
+                            world_model.real_step(old_tensor_obs, text, action, tensor_obs)
+                            world_model.imag_step(text, action, tensor_obs)
+
                     if t == args.max_steps - 1 and reward != 1:
                         reward = -1.0 # failed to complete objective
                         done = True
@@ -310,6 +345,9 @@ def train(args):
                     if done:
                         break
                     buffer.update(obs)
+
+                    if eval_episode < args.eval_eps - args.eval_vis_eps:
+                        world_model.vis_logs_reset()
                 eval_stats.end_of_episode()
 
             ppo.policy_old.train()
@@ -321,8 +359,43 @@ def train(args):
             if not args.check_script:
                 wandb.log(teststats[-1])
 
+            if args.world_model_train:
+                evallog = {'step': train_stats.total_steps}
+                
+                real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
+                imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
+                evallog.update(real_loss_and_metrics)
+                evallog.update(imag_loss_and_metrics)
+
+                true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
+                pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
+                real_probs = torch.cat((true_real_probs, pred_real_probs), dim=2)
+                evallog.update({f'real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+                true_real_multilabels = F.pad(torch.stack(world_model.true_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+                pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+                real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
+                evallog.update({f'real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'real_multilabels': wandb.Video(torch.mean(real_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+                true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
+                pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
+                imag_probs = torch.cat((true_imag_probs, pred_imag_probs), dim=2)
+                evallog.update({f'imag_prob_{i}': wandb.Video((255*imag_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'imag_probs': wandb.Video(torch.sum(imag_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+                true_imag_multilabels = F.pad(torch.stack(world_model.true_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+                pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+                imag_multilabels = torch.cat((true_imag_multilabels, pred_imag_multilabels), dim=2)
+                evallog.update({f'imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+                evallog.update({'imag_multilabels': wandb.Video(torch.mean(imag_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+                wandb.log(evallog)
+
             if eval_stats.compress()['val_win'] > max_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_max.pth")
+                torch.save(world_model.state_dict(), args.output + "_worldmodel_max.pth")
                 max_win = eval_stats.compress()['val_win']
                 
             # Save metrics
@@ -331,6 +404,8 @@ def train(args):
 
             # Save model states
             torch.save(ppo.policy_old.state_dict(), args.output + "_state.pth")
+            torch.save(world_model.state_dict(), args.output + "_worldmodel_state.pth")
+        world_model.vis_logs_reset()
             
         if i_episode > args.max_eps:
             break
@@ -384,6 +459,7 @@ if __name__ == "__main__":
     parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
     parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
+    parser.add_argument('--eval_vis_eps', default=5, type=int, help='number of episodes to run vis eval')
     parser.add_argument('--log_group', type=str, help="wandb log group")
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
