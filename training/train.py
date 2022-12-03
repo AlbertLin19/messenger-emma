@@ -212,21 +212,32 @@ def train(args):
             if not args.check_script:
                 wandb.log(runstats[-1])
 
-            true_real_grids = F.pad(torch.stack(world_model.true_real_grids, dim=0), (0, 0, 1, 1, 1, 1))
-            pred_real_grids = F.pad(torch.stack(world_model.pred_real_grids, dim=0), (0, 0, 1, 1, 1, 1))
-            pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-            real_grids = torch.cat((true_real_grids, pred_real_grids), dim=2)
-            real_multilabels = torch.cat((true_real_grids, pred_real_multilabels), dim=2)
-            true_imag_grids = F.pad(torch.stack(world_model.true_imag_grids, dim=0), (0, 0, 1, 1, 1, 1))
-            pred_imag_grids = F.pad(torch.stack(world_model.pred_imag_grids, dim=0), (0, 0, 1, 1, 1, 1))
-            pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-            imag_grids = torch.cat((true_imag_grids, pred_imag_grids), dim=2)
-            imag_multilabels = torch.cat((true_imag_grids, pred_imag_multilabels), dim=2)
             episodelog = {'step': train_stats.total_steps}
-            episodelog.update({f'real_grid_{i}': wandb.Video((255*real_grids[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-            episodelog.update({f'real_sprites': wandb.Video((255*(real_multilabels[..., 1:].sum(dim=-1, keepdim=True) > 0)).permute(0, 3, 1, 2).to(torch.uint8))})
-            episodelog.update({f'imag_grid_{i}': wandb.Video((255*imag_grids[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-            episodelog.update({f'imag_sprites': wandb.Video((255*(imag_multilabels[..., 1:].sum(dim=-1, keepdim=True) > 0)).permute(0, 3, 1, 2).to(torch.uint8))})
+            
+            true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            real_probs = torch.cat((true_real_probs, pred_real_probs), dim=2)
+            episodelog.update({f'real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            episodelog.update({'real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+            true_real_multilabels = F.pad(torch.stack(world_model.true_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
+            episodelog.update({f'real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            episodelog.update({'real_multilabels': wandb.Video(torch.mean(real_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+            true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            imag_probs = torch.cat((true_imag_probs, pred_imag_probs), dim=2)
+            episodelog.update({f'imag_prob_{i}': wandb.Video((255*imag_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            episodelog.update({'imag_probs': wandb.Video(torch.sum(imag_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
+            true_imag_multilabels = F.pad(torch.stack(world_model.true_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            imag_multilabels = torch.cat((true_imag_multilabels, pred_imag_multilabels), dim=2)
+            episodelog.update({f'imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            episodelog.update({'imag_multilabels': wandb.Video(torch.mean(imag_multilabels.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+
             wandb.log(episodelog)
 
             entity_ids = [entity.id for entity in NPCS]
