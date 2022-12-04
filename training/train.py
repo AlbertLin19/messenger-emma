@@ -87,6 +87,7 @@ def train(args):
             loss_type=args.world_model_loss_type,
             pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
             refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+            val_mlp_attention=args.world_model_val_mlp_attention,
             device=args.device
         )
 
@@ -500,6 +501,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_refine_pred_multilabel", default=False, action="store_true", help="Whether to refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_val_emb_dim", default=256, type=int, help="World model value embedding dimension.")
+    parser.add_argument("--world_model_val_mlp_attention", default=False, action="store_true", help="Whether to use an MLP to attend to the value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")

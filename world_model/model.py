@@ -7,7 +7,7 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
 
 class WorldModel(nn.Module):
-    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, val_mlp_attention, device):
         super().__init__()
 
         emb_dim = emma.emb_dim + val_emb_dim
@@ -17,10 +17,18 @@ class WorldModel(nn.Module):
 
         self.emma = emma
         self.txt_val = nn.Linear(768, val_emb_dim).to(device)
-        self.scale_val = nn.Sequential(
-            nn.Linear(768, 1),
-            nn.Softmax(dim=-2)
-        ).to(device)
+        if val_mlp_attention:
+            self.scale_val = nn.Sequential(
+                nn.Linear(768, 768),
+                nn.ReLU(),
+                nn.Linear(768, 1),
+                nn.Softmax(dim=-2)
+            ).to(device)
+        else:
+            self.scale_val = nn.Sequential(
+                nn.Linear(768, 1),
+                nn.Softmax(dim=-2)
+            ).to(device)
 
         self.encoder = Encoder(emb_dim, latent_size).to(device)
         self.decoder = Decoder(emb_dim, latent_size).to(device)
