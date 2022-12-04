@@ -7,7 +7,7 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
 
 class WorldModel(nn.Module):
-    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, device):
+    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
         emb_dim = emma.emb_dim + val_emb_dim
@@ -60,6 +60,9 @@ class WorldModel(nn.Module):
             self.cls_weight[0] = 3 / 100
         else:
             raise NotImplementedError
+
+        self.pred_multilabel_threshold = pred_multilabel_threshold
+        self.refine_pred_multilabel = refine_pred_multilabel
 
         self.vis_logs_reset()
 
@@ -150,21 +153,22 @@ class WorldModel(nn.Module):
         prob = self.multilabel_to_prob(multilabel)
 
         pred_logit, (self.real_hidden_state, self.real_cell_state) = self.forward(old_multilabel, text, action, (self.real_hidden_state, self.real_cell_state))
-        pred_prob = self.logit_to_prob(pred_logit)
         self.real_loss += self.loss(pred_logit, prob)
-        self.true_real_probs.append(prob.detach().cpu())
-        self.pred_real_probs.append(pred_prob.detach().cpu())
+        with torch.no_grad():
+            pred_prob = self.logit_to_prob(pred_logit)
+            self.true_real_probs.append(prob.cpu())
+            self.pred_real_probs.append(pred_prob.cpu())
 
-        pred_multilabel = convert_prob_to_multilabel(pred_prob, self.real_entity_ids)
-        self.true_real_multilabels.append(multilabel.detach().cpu())
-        self.pred_real_multilabels.append(pred_multilabel.detach().cpu())
+            pred_multilabel = convert_prob_to_multilabel(pred_prob, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.real_entity_ids)
+            self.true_real_multilabels.append(multilabel.cpu())
+            self.pred_real_multilabels.append(pred_multilabel.cpu())
 
-        confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
-        self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
-        self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
-        self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
-        self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
-        self.real_dists.append(self.dist(pred_multilabel, multilabel))
+            confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            self.real_tp += torch.sum(confusion == 1, dim=(0, 1))
+            self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
+            self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
+            self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
+            self.real_dists.append(self.dist(pred_multilabel, multilabel))
 
     def imag_step(self, text, action, obs):
         old_multilabel = self.imag_old_multilabel
@@ -172,22 +176,23 @@ class WorldModel(nn.Module):
         prob = self.multilabel_to_prob(multilabel)
 
         pred_logit, (self.imag_hidden_state, self.imag_cell_state) = self.forward(old_multilabel, text, action, (self.imag_hidden_state, self.imag_cell_state))
-        pred_prob = self.logit_to_prob(pred_logit)
         self.imag_loss += self.loss(pred_logit, prob)
-        self.true_imag_probs.append(prob.detach().cpu())
-        self.pred_imag_probs.append(pred_prob.detach().cpu())
+        with torch.no_grad():
+            pred_prob = self.logit_to_prob(pred_logit)
+            self.true_imag_probs.append(prob.cpu())
+            self.pred_imag_probs.append(pred_prob.cpu())
 
-        pred_multilabel = convert_prob_to_multilabel(pred_prob, self.imag_entity_ids)
-        self.imag_old_multilabel = pred_multilabel
-        self.true_imag_multilabels.append(multilabel.detach().cpu())
-        self.pred_imag_multilabels.append(pred_multilabel.detach().cpu())
+            pred_multilabel = convert_prob_to_multilabel(pred_prob, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.imag_entity_ids)
+            self.imag_old_multilabel = pred_multilabel
+            self.true_imag_multilabels.append(multilabel.cpu())
+            self.pred_imag_multilabels.append(pred_multilabel.cpu())
 
-        confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
-        self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
-        self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
-        self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
-        self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
-        self.imag_dists.append(self.dist(pred_multilabel, multilabel))
+            confusion = pred_multilabel / multilabel # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            self.imag_tp += torch.sum(confusion == 1, dim=(0, 1))
+            self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
+            self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
+            self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
+            self.imag_dists.append(self.dist(pred_multilabel, multilabel))
 
     def real_loss_update(self):
         self.optimizer.zero_grad()

@@ -61,7 +61,11 @@ def value_attend(text, emma):
     val_scale = emma.scale_val(text)
     return val_scale
 
-def convert_prob_to_multilabel(prob, entity_ids):
-    multilabel = 1*(prob > prob[..., 0:1])
+def convert_prob_to_multilabel(prob, threshold, refine, entity_ids):
+    multilabel = 1*(prob > torch.maximum(prob[..., 0:1], torch.tensor([threshold], device=prob.device)))
+    if refine:
+        multilabel = multilabel*(prob >= torch.amax(prob, dim=(0, 1)))
+        multilabel[..., 15:17] = (prob[..., 15:17] >= torch.max(prob[..., 15:17]))
+        multilabel[..., :15] = multilabel[..., :15]*(F.one_hot(entity_ids, num_classes=15).sum(dim=0))
     multilabel[..., 0] = (multilabel.sum(dim=-1) < 1)
     return multilabel
