@@ -133,7 +133,7 @@ class WorldModel(nn.Module):
             hams[hams < 0] = max_hams[hams < 0]
         else:
             hams = max_hams
-        return hams.sum()
+        return hams.mean()
         
     def real_state_reset(self, init_obs):
         self.real_hidden_state = torch.zeros((1, self.hidden_size), device=self.device)
