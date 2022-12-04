@@ -107,6 +107,22 @@ class WorldModel(nn.Module):
         else:
             raise NotImplementedError
         return prob
+
+    def dist(self, pred_multilabel, multilabel):
+        nonzeros = torch.nonzero(multilabel[..., 1:])                                           # N x 3
+        max_hams = torch.sum(torch.maximum(nonzeros[..., :-1], 9 - nonzeros[..., :-1]), dim=-1) # N
+
+        pred_nonzeros = torch.nonzero(pred_multilabel[..., 1:])                                 # M x 3
+        if len(pred_nonzeros > 0):
+            comparisons = nonzeros[:, None] - pred_nonzeros[None]                               # N x M x 3
+            hams = torch.sum(torch.abs(comparisons[..., :-1]), dim=-1)                          # N x M
+            id_diffs = comparisons[..., -1]                                                     # N x M
+            hams[id_diffs > 0] = -1
+            hams = hams.max(dim=-1).values                                                      # N
+            hams[hams < 0] = max_hams[hams < 0]
+        else:
+            hams = max_hams
+        return hams.sum()
         
     def real_state_reset(self, init_obs):
         self.real_hidden_state = torch.zeros((1, self.hidden_size), device=self.device)
@@ -148,17 +164,7 @@ class WorldModel(nn.Module):
         self.real_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.real_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
-
-        dist = 0
-        for sprite_id in range(17):
-            if torch.any(multilabel[..., sprite_id]):
-                pos = torch.nonzero(multilabel[..., sprite_id])[0]
-                if torch.any(pred_multilabel[..., sprite_id]):
-                    pred_pos = torch.nonzero(pred_multilabel[..., sprite_id])
-                    dist += torch.max(torch.sum(torch.abs(pos - pred_pos), dim=-1))
-                else:
-                    dist += torch.sum(torch.maximum(pos, 9 - pos))
-        self.real_dists.append(dist)
+        self.real_dists.append(self.dist(pred_multilabel, multilabel))
 
     def imag_step(self, text, action, obs):
         old_multilabel = self.imag_old_multilabel
@@ -181,17 +187,7 @@ class WorldModel(nn.Module):
         self.imag_fn += torch.sum(confusion == 0, dim=(0, 1))
         self.imag_fp += torch.sum(confusion == float('inf'), dim=(0, 1))
         self.imag_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
-
-        dist = 0
-        for sprite_id in range(17):
-            if torch.any(multilabel[..., sprite_id]):
-                pos = torch.nonzero(multilabel[..., sprite_id])[0]
-                if torch.any(pred_multilabel[..., sprite_id]):
-                    pred_pos = torch.nonzero(pred_multilabel[..., sprite_id])
-                    dist += torch.max(torch.sum(torch.abs(pos - pred_pos), dim=-1))
-                else:
-                    dist += torch.sum(torch.maximum(pos, 9 - pos))
-        self.imag_dists.append(dist)
+        self.imag_dists.append(self.dist(pred_multilabel, multilabel))
 
     def real_loss_update(self):
         self.optimizer.zero_grad()

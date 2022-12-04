@@ -3,7 +3,7 @@ import torch.nn.functional as F
 
 def convert_obs_to_multilabel(obs):
     multilabel = torch.sum(F.one_hot(obs, num_classes=17), dim=-2)
-    multilabel[..., 0] = torch.logical_not(torch.sum(obs > 0, dim=-1))
+    multilabel[..., 0] = torch.sum(obs, dim=-1) < 1
     return multilabel
 
 def convert_multilabel_to_emb(multilabel, text, world_model):
@@ -62,22 +62,6 @@ def value_attend(text, emma):
     return val_scale
 
 def convert_prob_to_multilabel(prob, entity_ids):
-    multilabel = torch.zeros((10, 10, 17), device=prob.device)
-    multilabel[..., 0] = 1
-    for entity_id in entity_ids:
-        max_prob = torch.max(prob[..., entity_id])
-        argmax_prob = torch.nonzero(prob[..., entity_id] == max_prob)[0]
-        if max_prob > prob[argmax_prob[0], argmax_prob[1], 0]:
-            multilabel[argmax_prob[0], argmax_prob[1], 0] = 0
-            multilabel[argmax_prob[0], argmax_prob[1], entity_id] = 1
-    max_av0_prob = torch.max(prob[..., -2])
-    max_av1_prob = torch.max(prob[..., -1])
-    if max_av0_prob > max_av1_prob:
-        argmax_av0_prob = torch.nonzero(prob[..., -2] == max_av0_prob)[0]
-        multilabel[argmax_av0_prob[0], argmax_av0_prob[1], 0] = 0
-        multilabel[argmax_av0_prob[0], argmax_av0_prob[1], -2] = 1
-    else:
-        argmax_av1_prob = torch.nonzero(prob[..., -1] == max_av1_prob)[0]
-        multilabel[argmax_av1_prob[0], argmax_av1_prob[1], 0] = 0
-        multilabel[argmax_av1_prob[0], argmax_av1_prob[1], -1] = 1
+    multilabel = 1*(prob > prob[..., 0:1])
+    multilabel[..., 0] = (multilabel.sum(dim=-1) < 1)
     return multilabel
