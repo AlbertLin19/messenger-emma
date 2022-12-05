@@ -35,9 +35,13 @@ def ground(text, ground_truth, world_model):
     kq = query @ key.t() # dot product attention (17 x num sent)
     if world_model.key_type == "oracle":
         return kq
-    mask = (kq != 0) # keep zeroed-out entries zero
-    kq = kq / world_model.attn_scale # scale to prevent vanishing grads
-    weights = F.softmax(kq, dim=-1) * mask # (17 x num sent)
+    elif world_model.key_type == "emma":
+        mask = (kq != 0) # keep zeroed-out entries zero
+        kq = kq / world_model.attn_scale # scale to prevent vanishing grads
+        weights = F.softmax(kq, dim=-1) * mask # (17 x num sent)
+    else:
+        # for other key_types, should I use world_model.attn_scale?
+        raise NotImplementedError
     
     return weights
 

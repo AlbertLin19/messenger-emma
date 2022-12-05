@@ -23,19 +23,25 @@ class WorldModel(nn.Module):
             self.sprite_emb = lambda x: F.one_hot(x, num_classes=17).float()
         elif key_type == "emma":
             self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+            self.attn_scale = np.sqrt(key_dim)
+            self.txt_key = nn.Linear(768, key_dim).to(device)
+            self.scale_key = nn.Sequential(
+                nn.Linear(768, 1),
+                nn.Softmax(dim=-2)
+            ).to(device)
         else:
             raise NotImplementedError
-        self.attn_scale = np.sqrt(key_dim)
-        self.txt_key = nn.Linear(768, key_dim).to(device)
-        self.scale_key = nn.Sequential(
-            nn.Linear(768, 1),
-            nn.Softmax(dim=-2)
-        ).to(device)
-        self.txt_val = nn.Linear(768, val_dim).to(device)
-        self.scale_val = nn.Sequential(
-            nn.Linear(768, 1),
-            nn.Softmax(dim=-2)
-        ).to(device)
+
+        if val_type == "oracle":
+            pass 
+        elif val_type == "emma":
+            self.txt_val = nn.Linear(768, val_dim).to(device)
+            self.scale_val = nn.Sequential(
+                nn.Linear(768, 1),
+                nn.Softmax(dim=-2)
+            ).to(device)
+        else:
+            raise NotImplementedError
 
         self.encoder = Encoder(emb_dim, latent_size).to(device)
         self.decoder = Decoder(17, hidden_size).to(device)

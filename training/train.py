@@ -470,7 +470,6 @@ if __name__ == "__main__":
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
 
     # World model arguments
-    parser.add_argument("--world_model_train", default=True, action="store_true", help="Whether to train a world model too.")
     parser.add_argument("--world_model_pred_multilabel_threshold", default=0.0, type=float, help="Probability threshold to predict existence of a sprite in pred_multilabel.")
     parser.add_argument("--world_model_refine_pred_multilabel", default=True, action="store_true", help="Whether to refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
@@ -480,7 +479,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_learning_rate", default=0.000001, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_type", default="cross", choices=["binary", "cross", "positional"], help="Which loss to use.")
     
     # Environment arguments
@@ -548,7 +547,7 @@ if __name__ == "__main__":
             project = "iw",
             entity = args.entity,
             group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_type}",
-            name = time.time()
+            name = str(int(time.time()))
         )
         wandb.config.update(args)
     
