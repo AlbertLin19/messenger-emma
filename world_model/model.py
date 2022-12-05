@@ -7,28 +7,26 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
 
 class WorldModel(nn.Module):
-    def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, val_mlp_attention, device):
+    def __init__(self, key_dim, val_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
-        emb_dim = 17 + val_emb_dim
+        emb_dim = 17 + val_dim
 
         self.latent_size = latent_size 
         self.hidden_size = hidden_size
 
-        self.emma = emma
-        self.txt_val = nn.Linear(768, val_emb_dim).to(device)
-        if val_mlp_attention:
-            self.scale_val = nn.Sequential(
-                nn.Linear(768, 768),
-                nn.ReLU(),
-                nn.Linear(768, 1),
-                nn.Softmax(dim=-2)
-            ).to(device)
-        else:
-            self.scale_val = nn.Sequential(
-                nn.Linear(768, 1),
-                nn.Softmax(dim=-2)
-            ).to(device)
+        self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+        self.attn_scale = sqrt(key_dim)
+        self.txt_key = nn.Linear(768, key_dim).to(device)
+        self.scale_key = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Softmax(dim=-2)
+        ).to(device)
+        self.txt_val = nn.Linear(768, val_dim).to(device)
+        self.scale_val = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Softmax(dim=-2)
+        ).to(device)
 
         self.encoder = Encoder(emb_dim, latent_size).to(device)
         self.decoder = Decoder(17, hidden_size).to(device)
