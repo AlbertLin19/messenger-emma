@@ -5,9 +5,15 @@ class Encoder(nn.Module):
         super().__init__()
 
         self.network = nn.Sequential(
-            nn.Conv2d(in_channels=channel_size, out_channels=latent_size, kernel_size=3, stride=2),
+            nn.Conv2d(in_channels=channel_size, out_channels=latent_size, kernel_size=3, stride=1),
             nn.ReLU(),
-            nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=4, stride=1),
+            nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=2, stride=1),
             nn.ReLU(),
             nn.Flatten(start_dim=0),
             nn.Linear(in_features=latent_size, out_features=latent_size),
@@ -24,9 +30,15 @@ class Decoder(nn.Module):
             nn.Linear(in_features=latent_size, out_features=latent_size),
             nn.ReLU(),
             nn.Unflatten(dim=-1, unflattened_size=(-1, 1, 1)),
-            nn.ConvTranspose2d(in_channels=latent_size, out_channels=latent_size, kernel_size=4, stride=1),
+            nn.ConvTranspose2d(in_channels=latent_size, out_channels=latent_size, kernel_size=2, stride=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels=latent_size, out_channels=channel_size, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(in_channels=latent_size, out_channels=latent_size, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=latent_size, out_channels=latent_size, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=latent_size, out_channels=latent_size, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.ConvTranspose2d(in_channels=latent_size, out_channels=channel_size, kernel_size=3, stride=1),
         )
 
     def forward(self, x):
