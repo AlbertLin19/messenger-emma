@@ -10,7 +10,7 @@ class WorldModel(nn.Module):
     def __init__(self, emma, val_emb_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, val_mlp_attention, device):
         super().__init__()
 
-        emb_dim = emma.emb_dim + val_emb_dim
+        emb_dim = 17 + val_emb_dim
 
         self.latent_size = latent_size 
         self.hidden_size = hidden_size

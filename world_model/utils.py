@@ -34,7 +34,7 @@ def convert_multilabel_to_emb(multilabel, text, world_model):
     values = values*multilabel[..., None] # (10 x 10 x 17 x val_emb_dim)
     value = torch.sum(values, dim=-2) / torch.sum(multilabel, dim=-1, keepdim=True)
 
-    return torch.cat((key, value), dim=-1)
+    return torch.cat((multilabel, value), dim=-1)
 
 def ground(text, emma):
     query = emma.sprite_emb(torch.arange(17, device=text.device)) # 17 x sprite_emb_dim
