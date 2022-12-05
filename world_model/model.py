@@ -44,9 +44,14 @@ class WorldModel(nn.Module):
             raise NotImplementedError
 
         self.encoder = Encoder(emb_dim, latent_size).to(device)
-        self.decoder = Decoder(17, latent_size).to(device)
+        self.decoder = Decoder(emb_dim, latent_size).to(device)
         self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
         self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
+        self.detector = nn.Sequential(
+            nn.Conv2d(in_channels=emb_dim, out_channels=(emb_dim + 17) // 2, kernel_size=1, stride=1),
+            nn.ReLU(),
+            nn.Conv2d(in_channels=(emb_dim + 17) // 2, out_channels=17, kernel_size=1, stride=1),
+        ).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         self.real_loss = 0
@@ -87,6 +92,9 @@ class WorldModel(nn.Module):
 
     def decode(self, latent):
         return self.decoder(latent).permute(1, 2, 0)
+
+    def detect(self, emb):
+        return self.detector(emb.permute(2, 0, 1)).permute(1, 2, 0)
         
     def forward(self, multilabel, text, ground_truth, action, lstm_states):
         latent = self.encode(convert_multilabel_to_emb(multilabel, text, ground_truth, self))
@@ -94,7 +102,7 @@ class WorldModel(nn.Module):
         lstm_in = torch.cat((latent, action), dim=-1).unsqueeze(0)
         lstm_out, (hidden_state, cell_state) = self.lstm(lstm_in, lstm_states)
         pred_latent = self.projection(lstm_out.squeeze(0))
-        pred_logit = self.decode(pred_latent)
+        pred_logit = self.detect(self.decode(pred_latent))
         return pred_logit, (hidden_state, cell_state)
 
     def loss(self, logit, prob):
