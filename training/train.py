@@ -11,7 +11,6 @@ import hashlib
 import gym
 import messenger # this needs to be imported even though its not used to register gym environment ids
 from messenger.models.utils import Encoder
-from messenger.envs.config import NPCS
 import torch
 import torch.nn.functional as F
 from transformers import AutoModel, AutoTokenizer
@@ -21,7 +20,7 @@ import numpy as np
 from model import TrainEMMA, Memory
 from train_tools import ObservationBuffer, PPO, TrainStats
 from world_model.model import WorldModel
-from world_model.utils import ground, key_attend, value_attend
+from world_model.utils import ground, get_NPCS
 
 
 def wrap_obs(obs):
@@ -65,7 +64,9 @@ def train(args):
     memory = Memory()
 
     world_model = WorldModel(
+        key_type=args.world_model_key_type,
         key_dim=args.world_model_key_dim,
+        val_type=args.world_model_val_type,
         val_dim=args.world_model_val_dim,
         latent_size=args.world_model_latent_size,
         hidden_size=args.world_model_hidden_size,
@@ -128,7 +129,9 @@ def train(args):
     ])
 
     while True: # main training loop
-        obs, text = env.reset(no_type_p=args.no_type_p)
+        obs, text = env.reset(no_type_p=args.no_type_p, attach_ground_truth=True)
+        ground_truth = [sent[1] for sent in text]
+        text = [sent[0] for sent in text]
         obs = wrap_obs(obs)
         tensor_obs = torch.from_numpy(obs).long().to(args.device)
         text, _ = encoder.encode(text)
@@ -150,9 +153,9 @@ def train(args):
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
             # World model predictions
-            world_model.real_step(old_tensor_obs, text, action, tensor_obs)
+            world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
             with torch.no_grad():
-                world_model.imag_step(text, action, tensor_obs)
+                world_model.imag_step(text, ground_truth, action, tensor_obs)
             
             # add the step penalty
             reward -= abs(args.step_penalty)
@@ -230,9 +233,8 @@ def train(args):
 
             wandb.log(episodelog)
 
-            entity_ids = [entity.id for entity in NPCS]
-            entity_descriptors = {entity.id: None for entity in NPCS}
-            entity_names = {entity.id: entity.name for entity in NPCS}
+            entity_names = get_NPCS()
+            entity_descriptors = {entity_id: None for entity_id in entity_names.keys()}
             while None in entity_descriptors.values():
                 if hasattr(env, 'cur_env'):
                     if random.random() < env.prob_env_1:
@@ -244,23 +246,25 @@ def train(args):
                 game = random.choice(cur_env.all_games)
                 variant = random.choice(cur_env.game_variants)
                 if entity_descriptors[game.enemy.id] is None:
-                    entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p)
+                    entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p, attach_ground_truth=True)
                 if entity_descriptors[game.message.id] is None:
-                    entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p)
+                    entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p, attach_ground_truth=True)
                 if entity_descriptors[game.goal.id] is None:
-                    entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p)
+                    entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p, attach_ground_truth=True)
             
             ordered_entity_ids = []
             ordered_entity_descriptors = []
             ordered_entity_names = []
             for i in range(17):
-                if i in entity_ids:
+                if i in entity_names.keys():
                     ordered_entity_ids.append(i)
                     ordered_entity_descriptors.append(entity_descriptors[i])
                     ordered_entity_names.append(entity_names[i])
             with torch.no_grad():
+                ordered_ground_truths = [sent[1] for sent in ordered_entity_descriptors]
+                ordered_entity_descriptors = [sent[0] for sent in ordered_entity_descriptors]
                 ordered_entity_descriptors, ordered_entity_tokens = encoder.encode(ordered_entity_descriptors)
-                world_model_grounding = ground(ordered_entity_descriptors, world_model)[ordered_entity_ids].cpu()
+                world_model_grounding = ground(ordered_entity_descriptors, ordered_ground_truths, world_model)[ordered_entity_ids].cpu()
 
                 groundinglog = {
                     'step': train_stats.total_steps,
@@ -272,11 +276,11 @@ def train(args):
                     columns = [train_stats.total_steps*np.ones(ordered_entity_tokens.size), ordered_entity_tokens.flatten()]
                     column_names = ["step", "token"]
                     if args.world_model_key_type == "emma":
-                        world_model_key_attention = key_attend(ordered_entity_descriptors, world_model).squeeze(-1).cpu()
+                        world_model_key_attention = world_model.scale_key(ordered_entity_descriptors).squeeze(-1).cpu()
                         columns.append(world_model_key_attention.numpy().flatten())
                         column_names.append("world_model_key")
                     if args.world_model_val_type == "emma":
-                        world_model_value_attention = value_attend(ordered_entity_descriptors, world_model).squeeze(-1).cpu()
+                        world_model_value_attention = world_model.scale_val(ordered_entity_descriptors).squeeze(-1).cpu()
                         columns.append(world_model_value_attention.numpy().flatten())
                         column_names.append("world_model_value")
                     attention_table = np.stack(columns, axis=-1)
@@ -299,7 +303,9 @@ def train(args):
             world_model.eval()
 
             for eval_episode in range(args.eval_eps):
-                obs, text = eval_env.reset(no_type_p=args.no_type_p)
+                obs, text = eval_env.reset(no_type_p=args.no_type_p, attach_ground_truth=True)
+                ground_truth = [sent[1] for sent in text]
+                text = [sent[0] for sent in text]
                 obs = wrap_obs(obs)
                 tensor_obs = torch.from_numpy(obs).long().to(args.device)
                 text, _ = encoder.encode(text)
@@ -319,8 +325,8 @@ def train(args):
                     # World model predictions
                     if eval_episode >= (args.eval_eps - args.eval_world_model_metrics_eps):
                         with torch.no_grad():
-                            world_model.real_step(old_tensor_obs, text, action, tensor_obs)
-                            world_model.imag_step(text, action, tensor_obs)
+                            world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
+                            world_model.imag_step(text, ground_truth, action, tensor_obs)
 
                     if t == args.max_steps - 1 and reward != 1:
                         reward = -1.0 # failed to complete objective
@@ -377,9 +383,8 @@ def train(args):
 
                 wandb.log(evallog)
 
-                entity_ids = [entity.id for entity in NPCS]
-                entity_descriptors = {entity.id: None for entity in NPCS}
-                entity_names = {entity.id: entity.name for entity in NPCS}
+                entity_names = get_NPCS()
+                entity_descriptors = {entity_id: None for entity_id in entity_names.keys()}
                 while None in entity_descriptors.values():
                     if hasattr(eval_env, 'cur_env'):
                         if random.random() < eval_env.prob_env_1:
@@ -391,23 +396,25 @@ def train(args):
                     game = random.choice(cur_env.all_games)
                     variant = random.choice(cur_env.game_variants)
                     if entity_descriptors[game.enemy.id] is None:
-                        entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p)
+                        entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p, attach_ground_truth=True)
                     if entity_descriptors[game.message.id] is None:
-                        entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p)
+                        entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p, attach_ground_truth=True)
                     if entity_descriptors[game.goal.id] is None:
-                        entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p)
+                        entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p, attach_ground_truth=True)
                 
                 ordered_entity_ids = []
                 ordered_entity_descriptors = []
                 ordered_entity_names = []
                 for i in range(17):
-                    if i in entity_ids:
+                    if i in entity_names.keys():
                         ordered_entity_ids.append(i)
                         ordered_entity_descriptors.append(entity_descriptors[i])
                         ordered_entity_names.append(entity_names[i])
                 with torch.no_grad():
+                    ground_truths = [sent[1] for sent in ordered_entity_descriptors]
+                    ordered_entity_descriptors = [sent[0] for sent in ordered_entity_descriptors]
                     ordered_entity_descriptors, ordered_entity_tokens = encoder.encode(ordered_entity_descriptors)
-                    world_model_grounding = ground(ordered_entity_descriptors, world_model)[ordered_entity_ids].cpu()
+                    world_model_grounding = ground(ordered_entity_descriptors, ground_truths, world_model)[ordered_entity_ids].cpu()
 
                     groundinglog = {
                         'step': train_stats.total_steps,
@@ -419,11 +426,11 @@ def train(args):
                         columns = [train_stats.total_steps*np.ones(ordered_entity_tokens.size), ordered_entity_tokens.flatten()]
                         column_names = ["step", "token"]
                         if args.world_model_key_type == "emma":
-                            world_model_key_attention = key_attend(ordered_entity_descriptors, world_model).squeeze(-1).cpu()
+                            world_model_key_attention = world_model.scale_key(ordered_entity_descriptors).squeeze(-1).cpu()
                             columns.append(world_model_key_attention.numpy().flatten())
                             column_names.append("world_model_key")
                         if args.world_model_val_type == "emma":
-                            world_model_value_attention = value_attend(ordered_entity_descriptors, world_model).squeeze(-1).cpu()
+                            world_model_value_attention = world_model.scale_val(ordered_entity_descriptors).squeeze(-1).cpu()
                             columns.append(world_model_value_attention.numpy().flatten())
                             column_names.append("world_model_value")
                         attention_table = np.stack(columns, axis=-1)
@@ -507,6 +514,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
     if args.output is None:
         args.output = f"output/key:{args.world_model_key_type}_value:{args.world_model_value_type}_loss:{args.world_model_loss_type}"
+    if args.world_model_key_type == "oracle":
+        args.world_model_key_dim = 17
+    if args.world_model_val_type == "oracle":
+        args.world_model_val_dim = 3
 
     assert args.eval_world_model_metrics_eps >= args.eval_world_model_vis_eps
     
@@ -538,7 +549,7 @@ if __name__ == "__main__":
             project = "iw",
             entity = args.entity,
             group = args.log_group if args.log_group is not None else args_hash,
-            name = f"key:{args.world_model_key_type}_value:{args.world_model_value_type}_loss:{args.world_model_loss_type}"
+            name = f"key:{args.world_model_key_type}:{args.world_model_key_dim}_value:{args.world_model_val_type}:{args.world_model_val_dim}_loss:{args.world_model_loss_type}"
         )
         wandb.config.update(args)
     

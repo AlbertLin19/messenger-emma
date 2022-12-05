@@ -16,7 +16,7 @@ class TextManual:
         with open(json_path, "r") as f:
             self.descriptors = json.load(f)
 
-    def get_descriptor(self, entity, role, entity_type, no_type_p=0.15):
+    def get_descriptor(self, entity, role, entity_type, no_type_p=0.0, attach_ground_truth=False):
         '''
         Get a descriptor using the templates.
         Parameters:
@@ -29,9 +29,13 @@ class TextManual:
             any type information (only if entity_type is not None).
         '''
         if random.random() < no_type_p: # no type information
+            if attach_ground_truth:
+                return random.choice(self.descriptors[entity][role]["unknown"]), (entity, entity_type)
             return random.choice(self.descriptors[entity][role]["unknown"])
 
         else:
+            if attach_ground_truth:
+                return random.choice(self.descriptors[entity][role][entity_type]), (entity, entity_type)
             return random.choice(self.descriptors[entity][role][entity_type])
 
     def get_document(self, enemy, message, goal, shuffle=False, 

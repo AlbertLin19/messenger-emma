@@ -7,7 +7,7 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
 
 class WorldModel(nn.Module):
-    def __init__(self, key_dim, val_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, key_type, key_dim, val_type, val_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
         emb_dim = 17 + val_dim
@@ -15,7 +15,15 @@ class WorldModel(nn.Module):
         self.latent_size = latent_size 
         self.hidden_size = hidden_size
 
-        self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+        self.key_type = key_type
+        self.val_type = val_type
+
+        if key_type == "oracle":
+            self.sprite_emb = lambda x: F.one_hot(x, num_classes=17)
+        elif key_type == "emma":
+            self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+        else:
+            raise NotImplementedError
         self.attn_scale = sqrt(key_dim)
         self.txt_key = nn.Linear(768, key_dim).to(device)
         self.scale_key = nn.Sequential(
@@ -72,8 +80,8 @@ class WorldModel(nn.Module):
     def decode(self, latent):
         return self.decoder(latent).permute(1, 2, 0)
         
-    def forward(self, multilabel, text, action, lstm_states):
-        latent = self.encode(convert_multilabel_to_emb(multilabel, text, self))
+    def forward(self, multilabel, text, ground_truth, action, lstm_states):
+        latent = self.encode(convert_multilabel_to_emb(multilabel, text, ground_truth, self))
         action = F.one_hot(torch.tensor(action, device=multilabel.device), num_classes=5)
         lstm_in = torch.cat((latent, action), dim=-1).unsqueeze(0)
         lstm_out, (hidden_state, cell_state) = self.lstm(lstm_in, lstm_states)
@@ -143,12 +151,12 @@ class WorldModel(nn.Module):
         self.imag_cell_state = self.imag_cell_state.detach()
         self.imag_old_multilabel = self.imag_old_multilabel.detach()
 
-    def real_step(self, old_obs, text, action, obs):
+    def real_step(self, old_obs, text, ground_truth, action, obs):
         old_multilabel = convert_obs_to_multilabel(old_obs)
         multilabel = convert_obs_to_multilabel(obs)
         prob = self.multilabel_to_prob(multilabel)
 
-        pred_logit, (self.real_hidden_state, self.real_cell_state) = self.forward(old_multilabel, text, action, (self.real_hidden_state, self.real_cell_state))
+        pred_logit, (self.real_hidden_state, self.real_cell_state) = self.forward(old_multilabel, text, ground_truth, action, (self.real_hidden_state, self.real_cell_state))
         self.real_loss += self.loss(pred_logit, prob)
         with torch.no_grad():
             pred_prob = self.logit_to_prob(pred_logit)
@@ -166,12 +174,12 @@ class WorldModel(nn.Module):
             self.real_tn += torch.sum(torch.isnan(confusion), dim=(0, 1))
             self.real_dists.append(self.dist(pred_multilabel, multilabel))
 
-    def imag_step(self, text, action, obs):
+    def imag_step(self, text, ground_truth, action, obs):
         old_multilabel = self.imag_old_multilabel
         multilabel = convert_obs_to_multilabel(obs)
         prob = self.multilabel_to_prob(multilabel)
 
-        pred_logit, (self.imag_hidden_state, self.imag_cell_state) = self.forward(old_multilabel, text, action, (self.imag_hidden_state, self.imag_cell_state))
+        pred_logit, (self.imag_hidden_state, self.imag_cell_state) = self.forward(old_multilabel, text, ground_truth, action, (self.imag_hidden_state, self.imag_cell_state))
         self.imag_loss += self.loss(pred_logit, prob)
         with torch.no_grad():
             pred_prob = self.logit_to_prob(pred_logit)
