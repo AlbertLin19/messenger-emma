@@ -349,94 +349,93 @@ def train(args):
             if not args.check_script:
                 wandb.log(teststats[-1])
 
-            if args.world_model_train:
-                evallog = {'step': train_stats.total_steps}
+            evallog = {'step': train_stats.total_steps}
                 
-                real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
-                imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
-                evallog.update({f'val_{key}': value for key, value in real_loss_and_metrics.items()})
-                evallog.update({f'val_{key}': value for key, value in imag_loss_and_metrics.items()})
+            real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
+            imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
+            evallog.update({f'val_{key}': value for key, value in real_loss_and_metrics.items()})
+            evallog.update({f'val_{key}': value for key, value in imag_loss_and_metrics.items()})
 
-                true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
-                pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
-                real_probs = torch.cat((true_real_probs, pred_real_probs), dim=2)
-                evallog.update({f'val_real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'val_real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+            true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            real_probs = torch.cat((true_real_probs, pred_real_probs), dim=2)
+            evallog.update({f'val_real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            evallog.update({'val_real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
 
-                true_real_multilabels = F.pad(torch.stack(world_model.true_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-                pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-                real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
-                evallog.update({f'val_real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'val_real_multilabels': wandb.Video(torch.min(torch.sum(real_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
+            true_real_multilabels = F.pad(torch.stack(world_model.true_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
+            evallog.update({f'val_real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            evallog.update({'val_real_multilabels': wandb.Video(torch.min(torch.sum(real_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
-                true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
-                pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
-                imag_probs = torch.cat((true_imag_probs, pred_imag_probs), dim=2)
-                evallog.update({f'val_imag_prob_{i}': wandb.Video((255*imag_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'val_imag_probs': wandb.Video(torch.sum(imag_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+            true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
+            imag_probs = torch.cat((true_imag_probs, pred_imag_probs), dim=2)
+            evallog.update({f'val_imag_prob_{i}': wandb.Video((255*imag_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            evallog.update({'val_imag_probs': wandb.Video(torch.sum(imag_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
 
-                true_imag_multilabels = F.pad(torch.stack(world_model.true_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-                pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-                imag_multilabels = torch.cat((true_imag_multilabels, pred_imag_multilabels), dim=2)
-                evallog.update({f'val_imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-                evallog.update({'val_imag_multilabels': wandb.Video(torch.min(torch.sum(imag_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
+            true_imag_multilabels = F.pad(torch.stack(world_model.true_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_imag_multilabels = F.pad(torch.stack(world_model.pred_imag_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
+            imag_multilabels = torch.cat((true_imag_multilabels, pred_imag_multilabels), dim=2)
+            evallog.update({f'val_imag_multilabel_{i}': wandb.Video((255*imag_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
+            evallog.update({'val_imag_multilabels': wandb.Video(torch.min(torch.sum(imag_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
-                wandb.log(evallog)
+            wandb.log(evallog)
 
-                entity_names = get_NPCS()
-                entity_descriptors = {entity_id: None for entity_id in entity_names.keys()}
-                while None in entity_descriptors.values():
-                    if hasattr(eval_env, 'cur_env'):
-                        if random.random() < eval_env.prob_env_1:
-                            cur_env = eval_env.env_1 
-                        else:
-                            cur_env = eval_env.env_2
+            entity_names = get_NPCS()
+            entity_descriptors = {entity_id: None for entity_id in entity_names.keys()}
+            while None in entity_descriptors.values():
+                if hasattr(eval_env, 'cur_env'):
+                    if random.random() < eval_env.prob_env_1:
+                        cur_env = eval_env.env_1 
                     else:
-                        cur_env = eval_env
-                    game = random.choice(cur_env.all_games)
-                    variant = random.choice(cur_env.game_variants)
-                    if entity_descriptors[game.enemy.id] is None:
-                        entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p, attach_ground_truth=True)
-                    if entity_descriptors[game.message.id] is None:
-                        entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p, attach_ground_truth=True)
-                    if entity_descriptors[game.goal.id] is None:
-                        entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p, attach_ground_truth=True)
-                
-                ordered_entity_ids = []
-                ordered_entity_descriptors = []
-                ordered_entity_names = []
-                for i in range(17):
-                    if i in entity_names.keys():
-                        ordered_entity_ids.append(i)
-                        ordered_entity_descriptors.append(entity_descriptors[i])
-                        ordered_entity_names.append(entity_names[i])
-                with torch.no_grad():
-                    ground_truths = [sent[1] for sent in ordered_entity_descriptors]
-                    ordered_entity_descriptors = [sent[0] for sent in ordered_entity_descriptors]
-                    ordered_entity_descriptors, ordered_entity_tokens = encoder.encode(ordered_entity_descriptors)
-                    world_model_grounding = ground(ordered_entity_descriptors, ground_truths, world_model)[ordered_entity_ids].cpu()
+                        cur_env = eval_env.env_2
+                else:
+                    cur_env = eval_env
+                game = random.choice(cur_env.all_games)
+                variant = random.choice(cur_env.game_variants)
+                if entity_descriptors[game.enemy.id] is None:
+                    entity_descriptors[game.enemy.id] = cur_env.text_manual.get_descriptor(entity=game.enemy.name, entity_type=variant.enemy_type, role="enemy", no_type_p=args.no_type_p, attach_ground_truth=True)
+                if entity_descriptors[game.message.id] is None:
+                    entity_descriptors[game.message.id] = cur_env.text_manual.get_descriptor(entity=game.message.name, entity_type=variant.message_type, role="message", no_type_p=args.no_type_p, attach_ground_truth=True)
+                if entity_descriptors[game.goal.id] is None:
+                    entity_descriptors[game.goal.id] = cur_env.text_manual.get_descriptor(entity=game.goal.name, entity_type=variant.goal_type, role="goal", no_type_p=args.no_type_p, attach_ground_truth=True)
+            
+            ordered_entity_ids = []
+            ordered_entity_descriptors = []
+            ordered_entity_names = []
+            for i in range(17):
+                if i in entity_names.keys():
+                    ordered_entity_ids.append(i)
+                    ordered_entity_descriptors.append(entity_descriptors[i])
+                    ordered_entity_names.append(entity_names[i])
+            with torch.no_grad():
+                ground_truths = [sent[1] for sent in ordered_entity_descriptors]
+                ordered_entity_descriptors = [sent[0] for sent in ordered_entity_descriptors]
+                ordered_entity_descriptors, ordered_entity_tokens = encoder.encode(ordered_entity_descriptors)
+                world_model_grounding = ground(ordered_entity_descriptors, ground_truths, world_model)[ordered_entity_ids].cpu()
 
-                    groundinglog = {
-                        'step': train_stats.total_steps,
-                        'val_world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0))
-                    }
+                groundinglog = {
+                    'step': train_stats.total_steps,
+                    'val_world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0))
+                }
 
-                    if (args.world_model_key_type == "emma") or (args.world_model_val_type == "emma"):
-                        ordered_entity_tokens = np.array(ordered_entity_tokens)
-                        columns = [train_stats.total_steps*np.ones(ordered_entity_tokens.size), ordered_entity_tokens.flatten()]
-                        column_names = ["step", "token"]
-                        if args.world_model_key_type == "emma":
-                            world_model_key_attention = world_model.scale_key(ordered_entity_descriptors).squeeze(-1).cpu()
-                            columns.append(world_model_key_attention.numpy().flatten())
-                            column_names.append("world_model_key")
-                        if args.world_model_val_type == "emma":
-                            world_model_value_attention = world_model.scale_val(ordered_entity_descriptors).squeeze(-1).cpu()
-                            columns.append(world_model_value_attention.numpy().flatten())
-                            column_names.append("world_model_value")
-                        attention_table = np.stack(columns, axis=-1)
-                        groundinglog.update({'val_token_attention': wandb.Table(columns=column_names, data=attention_table)})
-                        
-                wandb.log(groundinglog)
+                if (args.world_model_key_type == "emma") or (args.world_model_val_type == "emma"):
+                    ordered_entity_tokens = np.array(ordered_entity_tokens)
+                    columns = [train_stats.total_steps*np.ones(ordered_entity_tokens.size), ordered_entity_tokens.flatten()]
+                    column_names = ["step", "token"]
+                    if args.world_model_key_type == "emma":
+                        world_model_key_attention = world_model.scale_key(ordered_entity_descriptors).squeeze(-1).cpu()
+                        columns.append(world_model_key_attention.numpy().flatten())
+                        column_names.append("world_model_key")
+                    if args.world_model_val_type == "emma":
+                        world_model_value_attention = world_model.scale_val(ordered_entity_descriptors).squeeze(-1).cpu()
+                        columns.append(world_model_value_attention.numpy().flatten())
+                        column_names.append("world_model_value")
+                    attention_table = np.stack(columns, axis=-1)
+                    groundinglog.update({'val_token_attention': wandb.Table(columns=column_names, data=attention_table)})
+                    
+            wandb.log(groundinglog)
                 
             if eval_stats.compress()['val_win'] > max_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_max.pth")
@@ -479,7 +478,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.000001, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_learning_rate", default=0.000005, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_type", default="cross", choices=["binary", "cross", "positional"], help="Which loss to use.")
     
     # Environment arguments
