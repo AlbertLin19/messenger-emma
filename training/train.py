@@ -489,7 +489,7 @@ if __name__ == "__main__":
     
     # Training arguments
     parser.add_argument("--update_timestep", default=64, type=int, help="Number of steps before model update")
-    parser.add_argument("--lr", default=0.00005, type=float, help="learning rate")
+    parser.add_argument("--lr", default=0.0001, type=float, help="learning rate")
     parser.add_argument("--gamma", default=0.8, type=float, help="discount factor")
     parser.add_argument("--k_epochs", default=4, type=int, help="num epochs to update")
     parser.add_argument("--eps_clip", default=0.1, type=float, help="clip param for PPO")
