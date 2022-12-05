@@ -91,6 +91,9 @@ def train(args):
             device=args.device
         )
 
+        with open(args.output + '_architecture.txt', 'w') as f:
+            f.write(str(world_model))
+
     # logging variables
     teststats = []
     runstats = []
@@ -483,7 +486,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # General arguments
-    parser.add_argument("--output", required=True, type=str, help="Local output file name or path.")
+    parser.add_argument("--output", default=None, type=str, help="Local output file name or path.")
     parser.add_argument("--seed", default=0, type=int, help="Set the seed for the model and training.")
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
 
@@ -507,7 +510,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
-    parser.add_argument("--world_model_loss_type", default="cross_entropy", choices=["binary_cross_entropy", "cross_entropy", "positional_cross_entropy"], help="Which loss to use.")
+    parser.add_argument("--world_model_loss_type", default="cross", choices=["binary", "cross", "positional"], help="Which loss to use.")
     
     # Environment arguments
     parser.add_argument("--stage", default=2, type=int, help="the stage to run experiment on")
@@ -540,6 +543,8 @@ if __name__ == "__main__":
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
 
     args = parser.parse_args()
+    if args.output is None:
+        args.output = f"output/key:{args.world_model_key_type}_value:{args.world_model_value_type}_loss:{args.world_model_loss_type}"
 
     assert args.eval_world_model_metrics_eps >= args.eval_world_model_vis_eps
     

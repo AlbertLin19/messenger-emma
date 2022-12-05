@@ -54,10 +54,10 @@ class WorldModel(nn.Module):
         self.device = device
 
         self.loss_type = loss_type
-        if self.loss_type == "binary_cross_entropy":
+        if self.loss_type == "binary":
             self.pos_weight = 10*torch.ones(17, device=device)
             self.pos_weight[0] = 3 / 100
-        elif self.loss_type == "cross_entropy":
+        elif self.loss_type == "cross":
             self.cls_weight = torch.ones(17, device=device)
             self.cls_weight[0] = 3 / 100
         else:
@@ -83,27 +83,27 @@ class WorldModel(nn.Module):
         return pred_logit, (hidden_state, cell_state)
 
     def loss(self, logit, prob):
-        if self.loss_type == "binary_cross_entropy":
+        if self.loss_type == "binary":
             loss = F.binary_cross_entropy_with_logits(logit, prob, pos_weight=self.pos_weight)   
-        elif self.loss_type == "cross_entropy":
+        elif self.loss_type == "cross":
             loss = F.cross_entropy(logit.flatten(0, 1), prob.flatten(0, 1), weight=self.cls_weight)
         else:
             raise NotImplementedError
         return loss
 
     def logit_to_prob(self, logit):
-        if self.loss_type == "binary_cross_entropy":
+        if self.loss_type == "binary":
             prob = torch.sigmoid(logit)
-        elif self.loss_type == "cross_entropy":
+        elif self.loss_type == "cross":
             prob = F.softmax(logit, dim=-1)
         else:
             raise NotImplementedError
         return prob
 
     def multilabel_to_prob(self, multilabel):
-        if self.loss_type == "binary_cross_entropy":
+        if self.loss_type == "binary":
             prob = multilabel.float()
-        elif self.loss_type == "cross_entropy":
+        elif self.loss_type == "cross":
             prob = multilabel / multilabel.sum(dim=-1, keepdim=True)
         else:
             raise NotImplementedError
