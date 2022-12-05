@@ -507,13 +507,12 @@ if __name__ == "__main__":
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
     parser.add_argument('--eval_world_model_vis_eps', default=5, type=int, help='number of episodes to run world model vis eval')
     parser.add_argument('--eval_world_model_metrics_eps', default=50, type=int, help='number of episodes to run world model metrics eval')
-    parser.add_argument('--log_group', type=str, help="wandb log group")
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--check_script', action='store_true', help="run quickly just to see script runs okay.")
 
     args = parser.parse_args()
     if args.output is None:
-        args.output = f"output/key:{args.world_model_key_type}_value:{args.world_model_value_type}_loss:{args.world_model_loss_type}"
+        args.output = f"output/key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_type}_{int(time.time())}"
     if args.world_model_key_type == "oracle":
         args.world_model_key_dim = 17
     if args.world_model_val_type == "oracle":
@@ -548,8 +547,8 @@ if __name__ == "__main__":
         wandb.init(
             project = "iw",
             entity = args.entity,
-            group = args.log_group if args.log_group is not None else args_hash,
-            name = f"key:{args.world_model_key_type}:{args.world_model_key_dim}_value:{args.world_model_val_type}:{args.world_model_val_dim}_loss:{args.world_model_loss_type}"
+            group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_type}",
+            name = time.time()
         )
         wandb.config.update(args)
     

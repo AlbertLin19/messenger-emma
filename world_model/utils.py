@@ -22,7 +22,7 @@ def convert_obs_to_multilabel(obs):
 def ground(text, ground_truth, world_model):
     query = world_model.sprite_emb(torch.arange(17, device=world_model.device)) # 17 x sprite_emb_dim
     if world_model.key_type == "oracle":
-        key = F.one_hot(torch.tensor([ENTITY_IDS[truth[0]] for truth in ground_truth], device=world_model.device), num_classes=17)
+        key = F.one_hot(torch.tensor([ENTITY_IDS[truth[0]] for truth in ground_truth], device=world_model.device), num_classes=17).float()
     elif world_model.key_type == "emma":
         # Attention-based text representation        
         key = world_model.txt_key(text)

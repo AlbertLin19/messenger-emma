@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
 
 from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
@@ -19,12 +20,12 @@ class WorldModel(nn.Module):
         self.val_type = val_type
 
         if key_type == "oracle":
-            self.sprite_emb = lambda x: F.one_hot(x, num_classes=17)
+            self.sprite_emb = lambda x: F.one_hot(x, num_classes=17).float()
         elif key_type == "emma":
             self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
         else:
             raise NotImplementedError
-        self.attn_scale = sqrt(key_dim)
+        self.attn_scale = np.sqrt(key_dim)
         self.txt_key = nn.Linear(768, key_dim).to(device)
         self.scale_key = nn.Sequential(
             nn.Linear(768, 1),
@@ -129,7 +130,7 @@ class WorldModel(nn.Module):
             hams[hams < 0] = max_hams[hams < 0]
         else:
             hams = max_hams
-        return hams.mean()
+        return hams.float().mean()
         
     def real_state_reset(self, init_obs):
         self.real_hidden_state = torch.zeros((1, self.hidden_size), device=self.device)
