@@ -44,9 +44,10 @@ class WorldModel(nn.Module):
             raise NotImplementedError
 
         self.encoder = Encoder(emb_dim, latent_size).to(device)
-        self.decoder = Decoder(17, hidden_size).to(device)
+        self.decoder = Decoder(17, latent_size).to(device)
         self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
-        
+        self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
+
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         self.real_loss = 0
         self.imag_loss = 0
@@ -92,7 +93,8 @@ class WorldModel(nn.Module):
         action = F.one_hot(torch.tensor(action, device=multilabel.device), num_classes=5)
         lstm_in = torch.cat((latent, action), dim=-1).unsqueeze(0)
         lstm_out, (hidden_state, cell_state) = self.lstm(lstm_in, lstm_states)
-        pred_logit = self.decode(lstm_out.squeeze(0))
+        pred_latent = self.projection(lstm_out.squeeze(0))
+        pred_logit = self.decode(pred_latent)
         return pred_logit, (hidden_state, cell_state)
 
     def loss(self, logit, prob):
