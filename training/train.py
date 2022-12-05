@@ -477,8 +477,8 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
-    parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.000005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
+    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_type", default="cross", choices=["binary", "cross", "positional"], help="Which loss to use.")
     
     # Environment arguments
