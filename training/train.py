@@ -484,34 +484,36 @@ if __name__ == "__main__":
 
     # General arguments
     parser.add_argument("--output", required=True, type=str, help="Local output file name or path.")
-    parser.add_argument("--seed", default=None, type=int, help="Set the seed for the model and training.")
+    parser.add_argument("--seed", default=0, type=int, help="Set the seed for the model and training.")
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
 
     # Model arguments
-    parser.add_argument("--load_state", default=None, help="Path to model state dict.")
+    parser.add_argument("--load_state", default="../pretrained/emma_s2_3.pth", help="Path to model state dict.")
     parser.add_argument("--latent_vars", default=128, type=int, help="Latent model dimension.")
     parser.add_argument("--hist_len", default=3, type=int, help="Length of history used by state buffer")
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
 
     # World model arguments
-    parser.add_argument("--world_model_train", default=False, action="store_true", help="Whether to train a world model too.")
+    parser.add_argument("--world_model_train", default=True, action="store_true", help="Whether to train a world model too.")
     parser.add_argument("--world_model_train_alternatingly", default=False, action="store_true", help="Whether to have separate training phases for policy and world model.")
-    parser.add_argument("--world_model_train_separately", default=False, action="store_true", help="Whether to have separate networks for policy and world model.")
-    parser.add_argument("--world_model_pred_multilabel_threshold", default=0.2, type=float, help="Probability threshold to predict existence of a sprite in pred_multilabel.")
-    parser.add_argument("--world_model_refine_pred_multilabel", default=False, action="store_true", help="Whether to refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
+    parser.add_argument("--world_model_train_separately", default=True, action="store_true", help="Whether to have separate networks for policy and world model.")
+    parser.add_argument("--world_model_pred_multilabel_threshold", default=0.0, type=float, help="Probability threshold to predict existence of a sprite in pred_multilabel.")
+    parser.add_argument("--world_model_refine_pred_multilabel", default=True, action="store_true", help="Whether to refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
+    parser.add_argument("--world_model_key_emb_dim", default=256, type=int, help="World model key embedding dimension.")
+    parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_value_emb_dim", default=256, type=int, help="World model value embedding dimension.")
-    parser.add_argument("--world_model_value_mlp_attention", default=False, action="store_true", help="Whether to use an MLP to attend to the value tokens.")
+    parser.add_argument("--world_model_value_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
-    parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
+    parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
-    parser.add_argument("--world_model_loss_type", default="cross_entropy", choices=["binary_cross_entropy", "cross_entropy"], help="Which loss to use.")
+    parser.add_argument("--world_model_loss_type", default="cross_entropy", choices=["binary_cross_entropy", "cross_entropy", "positional_cross_entropy"], help="Which loss to use.")
     
     # Environment arguments
-    parser.add_argument("--stage", default=1, type=int, help="the stage to run experiment on")
-    parser.add_argument("--max_steps", default=4, type=int, help="Maximum num of steps per episode")
+    parser.add_argument("--stage", default=2, type=int, help="the stage to run experiment on")
+    parser.add_argument("--max_steps", default=64, type=int, help="Maximum num of steps per episode")
     parser.add_argument("--step_penalty", default=0.0, type=float, help="negative reward for each step")
-    parser.add_argument("--no_type_p", default=0.15, type=float, help="the probability of getting no movement type info in manual description")
+    parser.add_argument("--no_type_p", default=0.0, type=float, help="the probability of getting no movement type info in manual description")
     
     # Training arguments
     parser.add_argument("--update_timestep", default=64, type=int, help="Number of steps before model update")
@@ -523,8 +525,8 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", default=0.0, type=float, help="weight decay for optimizer")
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
     parser.add_argument("--max_eps", default=1e10, type=float, help="max training episodes")
-    parser.add_argument("--freeze_attention", default=False, action="store_true", help="Do not update attention weights.")
-    parser.add_argument("--freeze_policy", default=False, action="store_true", help="Do not update policy network.")
+    parser.add_argument("--freeze_attention", default=True, action="store_true", help="Do not update attention weights.")
+    parser.add_argument("--freeze_policy", default=True, action="store_true", help="Do not update policy network.")
 
     # Logging arguments
     parser.add_argument('--log_loss_interval', default=50, type=int, help='number of loss updates between logging')
@@ -566,10 +568,10 @@ if __name__ == "__main__":
 
     else:
         wandb.init(
-            project = "msgr-emma",
+            project = "iw",
             entity = args.entity,
             group = args.log_group if args.log_group is not None else args_hash,
-            name = f"emma_stage-{args.stage}_seed-{args.seed}"
+            name = f"key:{args.world_model_key_type}_value:{args.world_model_value_type}_loss:{args.world_model_loss_type}"
         )
         wandb.config.update(args)
     
