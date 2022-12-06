@@ -147,7 +147,7 @@ def train(args):
 
             # Running policy_old:
             with torch.no_grad():
-                action = ppo.policy_old.act(buffer.get_obs(), text, memory)
+                action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, memory)
             obs, reward, done, _ = env.step(action)
             obs = wrap_obs(obs)
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
@@ -317,7 +317,7 @@ def train(args):
                 for t in range(args.max_steps):
                     old_tensor_obs = tensor_obs
                     with torch.no_grad():
-                        action = ppo.policy_old.act(buffer.get_obs(), text, None)
+                        action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, None)
                     obs, reward, done, _ = eval_env.step(action)
                     obs = wrap_obs(obs)
                     tensor_obs = torch.from_numpy(obs).long().to(args.device)
@@ -467,6 +467,9 @@ if __name__ == "__main__":
     parser.add_argument("--latent_vars", default=128, type=int, help="Latent model dimension.")
     parser.add_argument("--hist_len", default=3, type=int, help="Length of history used by state buffer")
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
+
+    # Rollout generation arguments
+    parser.add_argument("--random_policy_p", default=0.25, type=float, help="the probability of choosing a random action instead of using the policy model")
 
     # World model arguments
     parser.add_argument("--world_model_pred_multilabel_threshold", default=0.0, type=float, help="Probability threshold to predict existence of a sprite in pred_multilabel.")
