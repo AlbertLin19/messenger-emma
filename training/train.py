@@ -42,23 +42,24 @@ def train(args):
         "weight_decay": args.weight_decay
     }
 
-    ppo = PPO(
-        ModelCls = TrainEMMA,
-        model_kwargs = model_kwargs,
-        device = args.device,
-        lr = args.lr,
-        gamma = args.gamma,
-        K_epochs = args.k_epochs,
-        eps_clip = args.eps_clip,
-        load_state = args.load_state,
-        optim_kwargs=optim_kwargs,
-        optimizer=args.optimizer
-    )
+    if not args.do_nothing_policy:
+        ppo = PPO(
+            ModelCls = TrainEMMA,
+            model_kwargs = model_kwargs,
+            device = args.device,
+            lr = args.lr,
+            gamma = args.gamma,
+            K_epochs = args.k_epochs,
+            eps_clip = args.eps_clip,
+            load_state = args.load_state,
+            optim_kwargs=optim_kwargs,
+            optimizer=args.optimizer
+        )
 
-    for param in ppo.policy.parameters():
-        param.requires_grad = False 
-    for param in ppo.policy_old.parameters():
-        param.requires_grad = False 
+        for param in ppo.policy.parameters():
+            param.requires_grad = False 
+        for param in ppo.policy_old.parameters():
+            param.requires_grad = False 
 
     # memory stores all the information needed by PPO to compute losses and make updates
     memory = Memory()
@@ -146,7 +147,10 @@ def train(args):
 
             # Running policy_old:
             with torch.no_grad():
-                action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, memory)
+                if args.do_nothing_policy:
+                    action = 0
+                else:
+                    action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, memory)
             obs, reward, done, _ = env.step(action)
             obs = wrap_obs(obs)
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
@@ -324,7 +328,10 @@ def train(args):
                 for t in range(args.max_steps):
                     old_tensor_obs = tensor_obs
                     with torch.no_grad():
-                        action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, None)
+                        if args.do_nothing_policy:
+                            action = 0
+                        else:
+                            action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, None)
                     obs, reward, done, _ = eval_env.step(action)
                     obs = wrap_obs(obs)
                     tensor_obs = torch.from_numpy(obs).long().to(args.device)
@@ -476,6 +483,7 @@ if __name__ == "__main__":
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
 
     # Rollout generation arguments
+    parser.add_argument("--do_nothing_policy", default=False, action="store_true", help="whether the policy should just be to stay in-place")
     parser.add_argument("--random_policy_p", default=0.25, type=float, help="the probability of choosing a random action instead of using the policy model")
 
     # World model arguments
