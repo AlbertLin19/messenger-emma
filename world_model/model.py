@@ -54,8 +54,10 @@ class WorldModel(nn.Module):
         ).to(device)
 
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
-        self.real_loss = 0
-        self.imag_loss = 0
+        self.real_step_count = 0
+        self.imag_step_count = 0
+        self.real_loss_total = 0
+        self.imag_loss_total = 0
 
         self.real_tp = torch.zeros(17, dtype=int, device=device)
         self.real_fn = torch.zeros(17, dtype=int, device=device)
@@ -169,12 +171,13 @@ class WorldModel(nn.Module):
         self.imag_old_multilabel = self.imag_old_multilabel.detach()
 
     def real_step(self, old_obs, text, ground_truth, action, obs):
+        self.real_step_count += 1
         old_multilabel = convert_obs_to_multilabel(old_obs)
         multilabel = convert_obs_to_multilabel(obs)
         prob = self.multilabel_to_prob(multilabel)
 
         pred_logit, (self.real_hidden_state, self.real_cell_state) = self.forward(old_multilabel, text, ground_truth, action, (self.real_hidden_state, self.real_cell_state))
-        self.real_loss += self.loss(pred_logit, prob)
+        self.real_loss_total += self.loss(pred_logit, prob)
         with torch.no_grad():
             pred_prob = self.logit_to_prob(pred_logit)
             self.true_real_probs.append(prob.cpu())
@@ -192,12 +195,13 @@ class WorldModel(nn.Module):
             self.real_dists.append(self.dist(pred_multilabel, multilabel))
 
     def imag_step(self, text, ground_truth, action, obs):
+        self.imag_step_count += 1
         old_multilabel = self.imag_old_multilabel
         multilabel = convert_obs_to_multilabel(obs)
         prob = self.multilabel_to_prob(multilabel)
 
         pred_logit, (self.imag_hidden_state, self.imag_cell_state) = self.forward(old_multilabel, text, ground_truth, action, (self.imag_hidden_state, self.imag_cell_state))
-        self.imag_loss += self.loss(pred_logit, prob)
+        self.imag_loss_total += self.loss(pred_logit, prob)
         with torch.no_grad():
             pred_prob = self.logit_to_prob(pred_logit)
             self.true_imag_probs.append(prob.cpu())
@@ -217,22 +221,24 @@ class WorldModel(nn.Module):
 
     def real_loss_update(self):
         self.optimizer.zero_grad()
-        self.real_loss.backward()
+        real_loss_mean = self.real_loss_total / self.real_step_count
+        real_loss_mean.backward()
         self.optimizer.step()
-        return self.real_loss.item()
+        return real_loss_mean.item()
 
     def imag_loss_update(self):
         self.optimizer.zero_grad()
-        self.imag_loss.backward()
+        imag_loss_mean = self.imag_loss_total / self.imag_step_count
+        imag_loss_mean.backward()
         self.optimizer.step()
-        return self.imag_loss.item()
+        return imag_loss_mean.item()
 
     def real_loss_and_metrics_reset(self):
         recall = self.real_tp / (self.real_tp + self.real_fn)
         precision = self.real_tp / (self.real_tp + self.real_fp)
         f1 = (2 * recall * precision) / (recall + precision)
         metrics = {
-            'real_loss': self.real_loss.item(),
+            'real_loss': self.real_loss_total.item() / self.real_step_count,
             'real_recall_sprite': recall[1:].nanmean(),
             'real_precision_sprite': precision[1:].nanmean(),
             'real_f1_sprite': f1[1:].nanmean(),
@@ -248,7 +254,8 @@ class WorldModel(nn.Module):
         metrics.update({f'real_f1_{i}': f1[i] for i in range(len(f1))})
         metrics.update({'real_distance': sum(self.real_dists)/len(self.real_dists)})
         
-        self.real_loss = 0
+        self.real_step_count = 0
+        self.real_loss_total = 0
         self.real_tp = torch.zeros(17, dtype=int, device=self.device)
         self.real_fn = torch.zeros(17, dtype=int, device=self.device)
         self.real_fp = torch.zeros(17, dtype=int, device=self.device)
@@ -262,7 +269,7 @@ class WorldModel(nn.Module):
         precision = self.imag_tp / (self.imag_tp + self.imag_fp)
         f1 = (2 * recall * precision) / (recall + precision)
         metrics = {
-            'imag_loss': self.imag_loss.item(),
+            'imag_loss': self.imag_loss_total.item() / self.imag_step_count,
             'imag_recall_sprite': recall[1:].nanmean(),
             'imag_precision_sprite': precision[1:].nanmean(),
             'imag_f1_sprite': f1[1:].nanmean(),
@@ -278,7 +285,8 @@ class WorldModel(nn.Module):
         metrics.update({f'imag_f1_{i}': f1[i] for i in range(len(f1))})
         metrics.update({'imag_distance': sum(self.imag_dists)/len(self.imag_dists)})
         
-        self.imag_loss = 0
+        self.imag_step_count = 0
+        self.imag_loss_total = 0
         self.imag_tp = torch.zeros(17, dtype=int, device=self.device)
         self.imag_fn = torch.zeros(17, dtype=int, device=self.device)
         self.imag_fp = torch.zeros(17, dtype=int, device=self.device)
