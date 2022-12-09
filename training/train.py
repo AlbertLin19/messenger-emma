@@ -148,7 +148,7 @@ def train(args):
             # Running policy_old:
             with torch.no_grad():
                 if args.do_nothing_policy:
-                    action = 0
+                    action = 4
                 else:
                     action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, memory)
             obs, reward, done, _ = env.step(action)
@@ -310,7 +310,8 @@ def train(args):
             wandb.log(updatelog)
 
             eval_stats.reset()
-            ppo.policy_old.eval()
+            if not args.do_nothing_policy:
+                ppo.policy_old.eval()
             world_model.eval()
 
             for eval_episode in range(args.eval_eps):
@@ -329,7 +330,7 @@ def train(args):
                     old_tensor_obs = tensor_obs
                     with torch.no_grad():
                         if args.do_nothing_policy:
-                            action = 0
+                            action = 4
                         else:
                             action = random.choice(range(5)) if random.random() < args.random_policy_p else ppo.policy_old.act(buffer.get_obs(), text, None)
                     obs, reward, done, _ = eval_env.step(action)
@@ -355,7 +356,8 @@ def train(args):
                     world_model.vis_logs_reset()
                 eval_stats.end_of_episode()
 
-            ppo.policy_old.train()
+            if not args.do_nothing_policy:
+                ppo.policy_old.train()
             world_model.train()
 
             print("TEST: \t {}".format(eval_stats))
