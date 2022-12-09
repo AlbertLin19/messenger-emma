@@ -86,7 +86,7 @@ def train(args):
         
     # make the environments
     env = gym.make(f'msgr-train-v{args.stage}')
-    eval_env = gym.make(f'msgr-val-v{args.stage}')
+    eval_env = gym.make(f'msgr-train-v{args.stage}') if args.eval_train else gym.make(f'msgr-val-v{args.stage}')
 
     # training stat tracker
     eval_stats = TrainStats({-1: 'val_death', 1: "val_win"})
@@ -510,6 +510,7 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
+    parser.add_argument('--eval_train', default=False, action="store_true", help='whether to evaluate on train environment')
     parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
     parser.add_argument('--eval_world_model_vis_eps', default=5, type=int, help='number of episodes to run world model vis eval')
