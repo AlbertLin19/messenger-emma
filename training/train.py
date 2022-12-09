@@ -104,6 +104,7 @@ def train(args):
     # training variables
     i_episode = 0
     timestep = 0
+    updatestep = 0
     max_win = -1
     max_train_win = -1
     start_time = time.time()
@@ -174,6 +175,7 @@ def train(args):
 
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
+                updatestep += 1
                 world_model.real_loss_update()
                 world_model.real_state_detach()
                 world_model.imag_state_detach()
@@ -182,10 +184,12 @@ def train(args):
                 memory.clear_memory()
                 timestep = 0
                 
-                updatelog = {'step': train_stats.total_steps}
-                updatelog.update(real_loss_and_metrics)
-                updatelog.update(imag_loss_and_metrics)
-                wandb.log(updatelog)
+                if updatestep % args.log_update_interval == 0:
+                    updatelog = {'step': train_stats.total_steps}
+                    updatelog.update(real_loss_and_metrics)
+                    updatelog.update(imag_loss_and_metrics)
+                    wandb.log(updatelog)
+                    updatestep = 0
                 
             if done:
                 break
@@ -519,6 +523,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_eps", default=1e10, type=float, help="max training episodes")
 
     # Logging arguments
+    parser.add_argument('--log_update_interval', default=10, type=int, help='number of loss updates between logging')
     parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
     parser.add_argument('--eval_train', default=False, action="store_true", help='whether to evaluate on train environment')
     parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
