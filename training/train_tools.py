@@ -145,6 +145,7 @@ class TrainStats:
         self.eps_reward = 0 # track rewards in episode
         self.steps = 0 # steps since last reset()
         self.total_steps = 0 # steps since object instantiation
+        self.total_episodes = 0
         self.episodes = 0
         
     # return str stats
@@ -168,6 +169,7 @@ class TrainStats:
     
     # end of episode
     def end_of_episode(self):
+        self.total_episodes += 1
         self.episodes += 1
         self.all_rewards.append(self.eps_reward)
         self.eps_reward = 0
@@ -196,6 +198,7 @@ class TrainStats:
         stats['avg_reward'] = sum(self.all_rewards) / self.episodes
         stats['avg_length'] = self.steps / self.episodes
         stats['episodes'] = self.episodes
+        stats['episode'] = self.total_episodes
         if append:
             stats.update(append)
         return stats

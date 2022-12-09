@@ -58,6 +58,7 @@ def convert_multilabel_to_emb(multilabel, text, ground_truth, world_model):
 
     weights = ground(text, ground_truth, world_model)
     entity_values = torch.mean(weights.unsqueeze(-1) * value, dim=-2) # (17 x val_emb_dim)
+    entity_values[0:1] = torch.tensor([0], device=world_model.device)
     entity_values[15:17] = torch.tensor([0], device=world_model.device)
     entity_values = entity_values*multilabel[..., None] # (10 x 10 x 17 x val_emb_dim)
     entity_value = torch.sum(entity_values, dim=-2)

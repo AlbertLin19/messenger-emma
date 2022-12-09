@@ -103,7 +103,6 @@ def train(args):
     # training variables
     i_episode = 0
     timestep = 0
-    updatestep = 0
     max_win = -1
     max_train_win = -1
     start_time = time.time()
@@ -171,7 +170,6 @@ def train(args):
 
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
-                updatestep += 1
                 world_model.real_loss_update()
                 world_model.real_state_detach()
                 world_model.imag_state_detach()
@@ -179,12 +177,11 @@ def train(args):
                 imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
                 memory.clear_memory()
                 timestep = 0
-                if updatestep % args.log_loss_interval == 0:
-                    updatelog = {'step': train_stats.total_steps}
-                    updatelog.update(real_loss_and_metrics)
-                    updatelog.update(imag_loss_and_metrics)
-                    wandb.log(updatelog)
-                    updatestep = 0
+                
+                updatelog = {'step': train_stats.total_steps}
+                updatelog.update(real_loss_and_metrics)
+                updatelog.update(imag_loss_and_metrics)
+                wandb.log(updatelog)
                 
             if done:
                 break
@@ -288,16 +285,26 @@ def train(args):
                     
             wandb.log(groundinglog)
             
-            if train_stats.compress()['win'] > max_train_win:
-                torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
-                torch.save(world_model.state_dict(), args.output + "_worldmodel_maxtrain.pth")
-                max_train_win = train_stats.compress()['win']
+            # if train_stats.compress()['win'] > max_train_win:
+            #     torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
+            #     torch.save(world_model.state_dict(), args.output + "_worldmodel_maxtrain.pth")
+            #     max_train_win = train_stats.compress()['win']
                 
             train_stats.reset()
         world_model.vis_logs_reset()
 
         # run evaluation
         if i_episode % args.eval_interval == 0:
+            # update and clear existing training loss and metrics
+            world_model.real_loss_update()
+            real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
+            imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
+            
+            updatelog = {'step': train_stats.total_steps}
+            updatelog.update(real_loss_and_metrics)
+            updatelog.update(imag_loss_and_metrics)
+            wandb.log(updatelog)
+
             eval_stats.reset()
             ppo.policy_old.eval()
             world_model.eval()
@@ -437,18 +444,18 @@ def train(args):
                     
             wandb.log(groundinglog)
                 
-            if eval_stats.compress()['val_win'] > max_win:
-                torch.save(ppo.policy_old.state_dict(), args.output + "_max.pth")
-                torch.save(world_model.state_dict(), args.output + "_worldmodel_max.pth")
-                max_win = eval_stats.compress()['val_win']
+            # if eval_stats.compress()['val_win'] > max_win:
+            #     torch.save(ppo.policy_old.state_dict(), args.output + "_max.pth")
+            #     torch.save(world_model.state_dict(), args.output + "_worldmodel_max.pth")
+            #     max_win = eval_stats.compress()['val_win']
                 
-            # Save metrics
-            with open(args.output + "_metrics.pkl", "wb") as file:
-                pickle.dump({"test": teststats, "run": runstats}, file)
+            # # Save metrics
+            # with open(args.output + "_metrics.pkl", "wb") as file:
+            #     pickle.dump({"test": teststats, "run": runstats}, file)
 
-            # Save model states
-            torch.save(ppo.policy_old.state_dict(), args.output + "_state.pth")
-            torch.save(world_model.state_dict(), args.output + "_worldmodel_state.pth")
+            # # Save model states
+            # torch.save(ppo.policy_old.state_dict(), args.output + "_state.pth")
+            # torch.save(world_model.state_dict(), args.output + "_worldmodel_state.pth")
         world_model.vis_logs_reset()
             
         if i_episode > args.max_eps:
@@ -502,7 +509,6 @@ if __name__ == "__main__":
     parser.add_argument("--max_eps", default=1e10, type=float, help="max training episodes")
 
     # Logging arguments
-    parser.add_argument('--log_loss_interval', default=50, type=int, help='number of loss updates between logging')
     parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
     parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
