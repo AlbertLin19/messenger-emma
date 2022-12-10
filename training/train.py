@@ -158,9 +158,16 @@ def train(args):
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
             # World model predictions
-            world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
-            with torch.no_grad():
+            if args.world_model_loss_source == "real":
+                world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
+                with torch.no_grad():
+                    world_model.imag_step(text, ground_truth, action, tensor_obs)
+            elif args.world_model_loss_source == "imag":
                 world_model.imag_step(text, ground_truth, action, tensor_obs)
+                with torch.no_grad():
+                    world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
+            else:
+                raise NotImplementedError
             
             # add the step penalty
             reward -= abs(args.step_penalty)
@@ -177,7 +184,10 @@ def train(args):
             # update the model and world_model if its time
             if timestep % args.update_timestep == 0:
                 updatestep += 1
-                world_model.real_loss_update()
+                if args.world_model_loss_source == "real":
+                    world_model.real_loss_update()
+                elif args.world_model_loss_source == "imag":
+                    world_model.imag_loss_update()
                 world_model.real_state_detach()
                 world_model.imag_state_detach()
                 real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
@@ -305,8 +315,11 @@ def train(args):
         # run evaluation
         if i_episode % args.eval_interval == 0:
             # update and clear existing training loss and metrics
-            if world_model.real_step_count > 0:
-                world_model.real_loss_update()
+            if ((args.world_model_loss_source == "real") and (world_model.real_step_count > 0)) or ((args.world_model_loss_source == "imag") and (world_model.imag_step_count > 0)):
+                if args.world_model_loss_source == "real":
+                    world_model.real_loss_update()
+                elif args.world_model_loss_source == "imag":
+                    world_model.imag_loss_update()
                 real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
                 imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
                 
@@ -506,6 +519,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_loss_type", default="cross", choices=["binary", "cross", "positional"], help="Which loss to use.")
     
     # Environment arguments
@@ -538,7 +552,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.output is None:
-        args.output = f"output/key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_type}_{int(time.time())}"
+        args.output = f"output/key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_loss_type}_{int(time.time())}"
     if args.world_model_key_type == "oracle":
         args.world_model_key_dim = 17
     if args.world_model_val_type == "oracle":
@@ -573,7 +587,7 @@ if __name__ == "__main__":
         wandb.init(
             project = "iw",
             entity = args.entity,
-            group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_type}",
+            group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_loss_type}",
             name = str(int(time.time()))
         )
         wandb.config.update(args)
