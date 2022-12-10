@@ -526,10 +526,10 @@ if __name__ == "__main__":
     parser.add_argument("--max_eps", default=1e10, type=float, help="max training episodes")
 
     # Logging arguments
-    parser.add_argument('--log_update_interval', default=10, type=int, help='number of loss updates between logging')
-    parser.add_argument('--log_interval', default=500, type=int, help='number of episodes between logging')
+    parser.add_argument('--log_update_interval', default=50, type=int, help='number of loss updates between logging')
+    parser.add_argument('--log_interval', default=5000, type=int, help='number of episodes between logging')
     parser.add_argument('--eval_train', default=False, action="store_true", help='whether to evaluate on train environment')
-    parser.add_argument('--eval_interval', default=500, type=int, help='number of episodes between eval')
+    parser.add_argument('--eval_interval', default=5000, type=int, help='number of episodes between eval')
     parser.add_argument('--eval_eps', default=500, type=int, help='number of episodes to run eval')
     parser.add_argument('--eval_world_model_vis_eps', default=5, type=int, help='number of episodes to run world model vis eval')
     parser.add_argument('--eval_world_model_metrics_eps', default=50, type=int, help='number of episodes to run world model metrics eval')

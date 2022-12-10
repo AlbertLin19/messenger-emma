@@ -89,7 +89,7 @@ class WorldModel(nn.Module):
             sc_weight = 3
             mc_weight = 1
             avatar_weight = 3 / 8
-            empty_weight = 3 / (8*96)
+            empty_weight = 3 / 96
             self.cls_weight = torch.tensor([
                 empty_weight, 0, 
                 mc_weight, sc_weight, sc_weight, sc_weight, sc_weight, mc_weight, 
