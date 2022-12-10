@@ -8,7 +8,7 @@ from world_model.modules import Encoder, Decoder
 from world_model.utils import convert_obs_to_multilabel, convert_multilabel_to_emb, convert_prob_to_multilabel
 
 class WorldModel(nn.Module):
-    def __init__(self, key_type, key_dim, val_type, val_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, key_type, key_dim, key_freeze, val_type, val_dim, latent_size, hidden_size, learning_rate, loss_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
         emb_dim = 17 + val_dim
@@ -29,6 +29,13 @@ class WorldModel(nn.Module):
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+            if key_freeze:
+                for param in self.sprite_emb.parameters():
+                    param.requires_grad = False
+                for param in self.txt_key.parameters():
+                    param.requires_grad = False
+                for param in self.scale_key.parameters():
+                    param.requires_grad = False
         else:
             raise NotImplementedError
 
