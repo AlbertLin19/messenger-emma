@@ -79,6 +79,14 @@ register(
 )
 
 register(
+    id = "msgr-val_same_worlds-v2",
+    entry_point="messenger.envs:StageTwo",
+    kwargs = dict(
+        split="val_same_worlds",
+    )
+)
+
+register(
     id = "msgr-test-v2",
     entry_point="messenger.envs:StageTwo",
     kwargs = dict(

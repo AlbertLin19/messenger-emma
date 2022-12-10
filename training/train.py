@@ -87,7 +87,7 @@ def train(args):
         
     # make the environments
     env = gym.make(f'msgr-train-v{args.stage}')
-    eval_env = gym.make(f'msgr-train-v{args.stage}') if args.eval_train else gym.make(f'msgr-val-v{args.stage}')
+    eval_env = gym.make(f'msgr-train-v{args.stage}') if args.eval_train else gym.make(f'msgr-val_same_worlds-v{args.stage}')
 
     # training stat tracker
     eval_stats = TrainStats({-1: 'val_death', 1: "val_win"})
@@ -304,14 +304,15 @@ def train(args):
         # run evaluation
         if i_episode % args.eval_interval == 0:
             # update and clear existing training loss and metrics
-            world_model.real_loss_update()
-            real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
-            imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
-            
-            updatelog = {'step': train_stats.total_steps}
-            updatelog.update(real_loss_and_metrics)
-            updatelog.update(imag_loss_and_metrics)
-            wandb.log(updatelog)
+            if world_model.real_step_count > 0:
+                world_model.real_loss_update()
+                real_loss_and_metrics = world_model.real_loss_and_metrics_reset()
+                imag_loss_and_metrics = world_model.imag_loss_and_metrics_reset()
+                
+                updatelog = {'step': train_stats.total_steps}
+                updatelog.update(real_loss_and_metrics)
+                updatelog.update(imag_loss_and_metrics)
+                wandb.log(updatelog)
 
             eval_stats.reset()
             if not args.do_nothing_policy:
