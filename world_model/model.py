@@ -79,8 +79,16 @@ class WorldModel(nn.Module):
             self.pos_weight = 10*torch.ones(17, device=device)
             self.pos_weight[0] = 3 / 100
         elif self.loss_type == "cross":
-            self.cls_weight = torch.ones(17, device=device)
-            self.cls_weight[0] = 3 / 100
+            sc_weight = 3
+            mc_weight = 1
+            avatar_weight = 3 / 8
+            empty_weight = 3 / (8*96)
+            self.cls_weight = torch.tensor([
+                empty_weight, 0, 
+                mc_weight, sc_weight, sc_weight, sc_weight, sc_weight, mc_weight, 
+                mc_weight, mc_weight, sc_weight, mc_weight, mc_weight, sc_weight,
+                0, avatar_weight, 1,
+            ], device=device)
         else:
             raise NotImplementedError
 
