@@ -492,7 +492,7 @@ if __name__ == "__main__":
 
     # Rollout generation arguments
     parser.add_argument("--do_nothing_policy", default=False, action="store_true", help="whether the policy should just be to stay in-place")
-    parser.add_argument("--random_policy_p", default=0.25, type=float, help="the probability of choosing a random action instead of using the policy model")
+    parser.add_argument("--random_policy_p", default=0.0, type=float, help="the probability of choosing a random action instead of using the policy model")
 
     # World model arguments
     parser.add_argument("--world_model_pred_multilabel_threshold", default=0.0, type=float, help="Probability threshold to predict existence of a sprite in pred_multilabel.")
