@@ -67,7 +67,6 @@ def train(args):
     world_model = WorldModel(
         key_type=args.world_model_key_type,
         key_dim=args.world_model_key_dim,
-        key_freeze=args.world_model_key_freeze,
         val_type=args.world_model_val_type,
         val_dim=args.world_model_val_dim,
         latent_size=args.world_model_latent_size,
@@ -78,6 +77,8 @@ def train(args):
         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
         device=args.device
     )
+    if args.world_model_key_freeze:
+        world_model.freeze_key()
 
     with open(args.output + '_architecture.txt', 'w') as f:
         f.write(str(world_model))
@@ -158,6 +159,9 @@ def train(args):
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
             # World model predictions
+            if args.world_model_key_freeze and (train_stats.total_steps >= args.world_model_key_unfreeze_step):
+                world_model.unfreeze_key()
+                args.world_model_key_freeze = False
             if args.world_model_loss_source == "real":
                 world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
                 with torch.no_grad():
@@ -514,6 +518,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_key_dim", default=256, type=int, help="World model key embedding dimension.")
     parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
+    parser.add_argument("--world_model_key_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze key module.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
