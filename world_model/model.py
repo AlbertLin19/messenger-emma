@@ -29,6 +29,16 @@ class WorldModel(nn.Module):
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+        elif key_type == "emma-mlp_scale":
+            self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+            self.attn_scale = np.sqrt(key_dim)
+            self.txt_key = nn.Linear(768, key_dim).to(device)
+            self.scale_key = nn.Sequential(
+                nn.Linear(768, 384),
+                nn.ReLU(),
+                nn.Linear(384, 1),
+                nn.Softmax(dim=-2)
+            ).to(device)
         else:
             raise NotImplementedError
 

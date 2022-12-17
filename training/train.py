@@ -516,7 +516,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_refine_pred_multilabel", default=True, action="store_true", help="Whether to refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_key_dim", default=256, type=int, help="World model key embedding dimension.")
-    parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' key tokens.")
+    parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
     parser.add_argument("--world_model_key_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze key module.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
@@ -590,7 +590,7 @@ if __name__ == "__main__":
 
     else:
         wandb.init(
-            project = "iw",
+            project = "iw_running",
             entity = args.entity,
             group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_loss_type}",
             name = str(int(time.time()))
