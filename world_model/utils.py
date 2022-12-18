@@ -23,7 +23,7 @@ def ground(text, ground_truth, world_model):
     query = world_model.sprite_emb(torch.arange(17, device=world_model.device)) # 17 x sprite_emb_dim
     if world_model.key_type == "oracle":
         key = F.one_hot(torch.tensor([ENTITY_IDS[truth[0]] for truth in ground_truth], device=world_model.device), num_classes=17).float()
-    elif world_model.key_type == "emma":
+    elif world_model.key_type == "emma" or world_model.key_type == "emma-mlp_scale":
         # Attention-based text representation        
         key = world_model.txt_key(text)
         key_scale = world_model.scale_key(text) # (num sent, sent_len, 1)
@@ -35,7 +35,7 @@ def ground(text, ground_truth, world_model):
     kq = query @ key.t() # dot product attention (17 x num sent)
     if world_model.key_type == "oracle":
         return kq
-    elif world_model.key_type == "emma":
+    elif world_model.key_type == "emma" or world_model.key_type == "emma-mlp_scale":
         mask = (kq != 0) # keep zeroed-out entries zero
         kq = kq / world_model.attn_scale # scale to prevent vanishing grads
         weights = F.softmax(kq, dim=-1) * mask # (17 x num sent)
