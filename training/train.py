@@ -291,15 +291,15 @@ def train(args):
                     'world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0))
                 }
 
-                if (args.world_model_key_type == "emma") or (args.world_model_val_type == "emma"):
+                if ("emma" in args.world_model_key_type) or ("emma" in args.world_model_val_type):
                     ordered_entity_tokens = np.array(ordered_entity_tokens)
                     columns = [train_stats.total_steps*np.ones(ordered_entity_tokens.size), ordered_entity_tokens.flatten()]
                     column_names = ["step", "token"]
-                    if args.world_model_key_type == "emma":
+                    if "emma" in args.world_model_key_type:
                         world_model_key_attention = world_model.scale_key(ordered_entity_descriptors).squeeze(-1).cpu()
                         columns.append(world_model_key_attention.numpy().flatten())
                         column_names.append("world_model_key")
-                    if args.world_model_val_type == "emma":
+                    if "emma" in args.world_model_val_type:
                         world_model_value_attention = world_model.scale_val(ordered_entity_descriptors).squeeze(-1).cpu()
                         columns.append(world_model_value_attention.numpy().flatten())
                         column_names.append("world_model_value")
@@ -459,15 +459,15 @@ def train(args):
                     'val_world_model_grounding': wandb.Image(world_model_grounding.unsqueeze(0))
                 }
 
-                if (args.world_model_key_type == "emma") or (args.world_model_val_type == "emma"):
+                if ("emma" in args.world_model_key_type) or ("emma" in args.world_model_val_type):
                     ordered_entity_tokens = np.array(ordered_entity_tokens)
                     columns = [train_stats.total_steps*np.ones(ordered_entity_tokens.size), ordered_entity_tokens.flatten()]
                     column_names = ["step", "token"]
-                    if args.world_model_key_type == "emma":
+                    if "emma" in args.world_model_key_type:
                         world_model_key_attention = world_model.scale_key(ordered_entity_descriptors).squeeze(-1).cpu()
                         columns.append(world_model_key_attention.numpy().flatten())
                         column_names.append("world_model_key")
-                    if args.world_model_val_type == "emma":
+                    if "emma" in args.world_model_val_type:
                         world_model_value_attention = world_model.scale_val(ordered_entity_descriptors).squeeze(-1).cpu()
                         columns.append(world_model_value_attention.numpy().flatten())
                         column_names.append("world_model_value")
