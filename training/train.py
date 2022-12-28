@@ -159,7 +159,7 @@ def train(args):
             tensor_obs = torch.from_numpy(obs).long().to(args.device)
 
             # World model predictions
-            if args.world_model_key_freeze and (train_stats.total_steps >= args.world_model_key_unfreeze_step):
+            if args.world_model_key_freeze and ((args.world_model_key_unfreeze_step >= 0) and (train_stats.total_steps >= args.world_model_key_unfreeze_step)):
                 world_model.unfreeze_key()
                 args.world_model_key_freeze = False
             if args.world_model_loss_source == "real":
@@ -518,7 +518,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_key_dim", default=256, type=int, help="World model key embedding dimension.")
     parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
-    parser.add_argument("--world_model_key_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze key module.")
+    parser.add_argument("--world_model_key_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze key module, -1 means never.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
