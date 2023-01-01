@@ -79,6 +79,8 @@ def train(args):
     )
     if args.world_model_key_freeze:
         world_model.freeze_key()
+    if args.world_model_val_freeze:
+        world_model.freeze_val()
 
     with open(args.output + '_architecture.txt', 'w') as f:
         f.write(str(world_model))
@@ -162,6 +164,9 @@ def train(args):
             if args.world_model_key_freeze and ((args.world_model_key_unfreeze_step >= 0) and (train_stats.total_steps >= args.world_model_key_unfreeze_step)):
                 world_model.unfreeze_key()
                 args.world_model_key_freeze = False
+            if args.world_model_val_freeze and ((args.world_model_val_unfreeze_step >= 0) and (train_stats.total_steps >= args.world_model_val_unfreeze_step)):
+                world_model.unfreeze_val()
+                args.world_model_val_freeze = False
             if args.world_model_loss_source == "real":
                 world_model.real_step(old_tensor_obs, text, ground_truth, action, tensor_obs)
                 with torch.no_grad():
@@ -520,7 +525,9 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
     parser.add_argument("--world_model_key_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze key module, -1 means never.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
-    parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma"], help="What to use to process the descriptors' value tokens.")
+    parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' value tokens.")
+    parser.add_argument("--world_model_val_freeze", default=False, action="store_true", help="Whether to freeze val module.")
+    parser.add_argument("--world_model_val_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze val module, -1 means never.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")

@@ -50,6 +50,14 @@ class WorldModel(nn.Module):
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+        elif val_type == "emma-mlp_scale":
+            self.txt_val = nn.Linear(768, val_dim).to(device)
+            self.scale_val = nn.Sequential(
+                nn.Linear(768, 384),
+                nn.ReLU(),
+                nn.Linear(384, 1),
+                nn.Softmax(dim=-2)
+            ).to(device)
         else:
             raise NotImplementedError
 
@@ -123,6 +131,18 @@ class WorldModel(nn.Module):
         for param in self.txt_key.parameters():
             param.requires_grad = True
         for param in self.scale_key.parameters():
+            param.requires_grad = True
+
+    def freeze_val(self):
+        for param in self.txt_val.parameters():
+            param.requires_grad = False
+        for param in self.scale_val.parameters():
+            param.requires_grad = False
+
+    def unfreeze_val(self):
+        for param in self.txt_val.parameters():
+            param.requires_grad = True
+        for param in self.scale_val.parameters():
             param.requires_grad = True
 
     def encode(self, emb):
