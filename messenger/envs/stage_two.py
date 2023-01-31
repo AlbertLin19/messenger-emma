@@ -38,7 +38,7 @@ class StageTwo(MessengerEnv):
     into entities (e.g. alien, knight, mage).
     '''
 
-    def __init__(self, split:str, shuffle_obs=True):
+    def __init__(self, split:str, shuffle_obs=True, fix_order=False):
         super().__init__()
         self.shuffle_obs = shuffle_obs # shuffle the entity layers
 
@@ -85,6 +85,11 @@ class StageTwo(MessengerEnv):
         # entities tracked by VGDLEnv
         self.notable_sprites = ["enemy", "message", "goal", "no_message", "with_message"]
         self.env = None # the VGDLEnv
+
+        self.fix_order = fix_order
+        self.next_game_idx = 0
+        self.next_variant_idx = 0
+        self.next_init_state_idx = 0
 
     def _get_variant(self, variant_file:Path) -> GameVariant:
         '''
@@ -154,12 +159,19 @@ class StageTwo(MessengerEnv):
         properly reset the environment. kwargs go to get_document().
         '''
 
-        self.game = random.choice(self.all_games) # (e.g. enemy-alien, message-knight, goal - bear)
+        if not self.fix_order:
+            self.next_game_idx = random.randrange(len(self.all_games))
+        self.game = self.all_games[self.next_game_idx] # (e.g. enemy-alien, message-knight, goal - bear)
 
         # choose the game variant (e.g. enmey-chasing, message-fleeing, goal-static)
         # and initial starting location of the entities.
-        variant = random.choice(self.game_variants)
-        init_state = random.choice(self.init_states) # inital state file
+        if not self.fix_order:
+            self.next_variant_idx = random.randrange(len(self.game_variants))
+        variant = self.game_variants[self.next_variant_idx]
+
+        if not self.fix_order:
+            self.next_init_state_idx = random.randrange(len(self.init_states))
+        init_state = self.init_states[self.next_init_state_idx] # inital state file
 
         # args that will go into VGDL Env.
         self._envargs = {
@@ -184,6 +196,17 @@ class StageTwo(MessengerEnv):
 
         if self.shuffle_obs:
             random.shuffle(manual)
+
+        if self.fix_order:
+            self.next_game_idx += 1
+            if self.next_game_idx >= len(self.all_games):
+                self.next_game_idx = 0
+                self.next_variant_idx += 1
+                if self.next_variant_idx >= len(self.game_variants):
+                    self.next_variant_idx = 0
+                    self.next_init_state_idx += 1
+                    if self.next_init_state_idx >= len(self.init_states):
+                        self.next_init_state_idx = 0
             
         return self._convert_obs(vgdl_obs), manual
 
