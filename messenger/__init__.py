@@ -55,6 +55,14 @@ register(
 )
 
 register(
+    id = "msgr-train_all-v2",
+    entry_point="messenger.envs:StageTwo",
+    kwargs = dict(
+        split="train_all",
+    )
+)
+
+register(
     id = "msgr-train-sc-v2",
     entry_point="messenger.envs:StageTwo",
     kwargs = dict(
@@ -91,6 +99,22 @@ register(
     entry_point="messenger.envs:StageTwo",
     kwargs = dict(
         split="test",
+    )
+)
+
+register(
+    id = "msgr-test_same_worlds-v2",
+    entry_point="messenger.envs:StageTwo",
+    kwargs = dict(
+        split="test_same_worlds",
+    )
+)
+
+register(
+    id = "msgr-test_same_worlds-se-v2",
+    entry_point="messenger.envs:StageTwo",
+    kwargs = dict(
+        split="test_same_worlds_se",
     )
 )
 

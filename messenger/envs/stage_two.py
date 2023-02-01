@@ -51,6 +51,9 @@ class StageTwo(MessengerEnv):
         elif "train" in split and "sc" in split: # single-combination games
             game_split = "train_single_comb"
             text_json_path = this_folder.joinpath("texts", "text_train.json")
+        elif "train" in split and "all" in split: # single-combination and multi-combination games
+            game_split = "train_all"
+            text_json_path = this_folder.joinpath("texts", "text_train.json")
         elif "val" in split:
             if "val_same_worlds" in split:
                 game_split = "val_same_worlds"
@@ -58,7 +61,10 @@ class StageTwo(MessengerEnv):
                 game_split = "val"
             text_json_path = this_folder.joinpath("texts", "text_val.json")
         elif "test" in split:
-            game_split = "test"
+            if "test_same_worlds" in split:
+                game_split = "test_same_worlds"
+            else:
+                game_split = "test"
             text_json_path = this_folder.joinpath("texts", "text_test.json")
         else:
             raise Exception(f"Split: {split} not understood.")

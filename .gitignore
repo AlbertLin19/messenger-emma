@@ -1,5 +1,6 @@
 *.pyc
 *.pth
+*.pickle
 messenger.egg-info
 wandb
 output
