@@ -67,7 +67,7 @@ test_same_worlds_se_manuals, test_same_worlds_se_ground_truths, test_same_worlds
 test_same_worlds_manuals, test_same_worlds_ground_truths, test_same_worlds_grid_sequences = collect_rollouts(test_same_worlds_env)
 
 dataset = {
-    'train': {
+    'train_all': {
         'manuals': train_all_manuals,
         'ground_truths': train_all_ground_truths,
         'grid_sequences': train_all_grid_sequences,
