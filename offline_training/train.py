@@ -7,14 +7,14 @@ import time
 import pickle
 import random
 import hashlib
-
-from messenger.models.utils import BatchedEncoder
 import torch
 import torch.nn.functional as F
-from transformers import AutoModel, AutoTokenizer
 import wandb
 import numpy as np
 
+from tqdm import tqdm
+from transformers import AutoModel, AutoTokenizer
+from messenger.models.utils import BatchedEncoder
 from offline_training.batched_world_model.model import BatchedWorldModel
 from dataloader import DataLoader
 
@@ -75,7 +75,8 @@ def train(args):
 
         old_tensor_grids = tensor_grids
         grids, actions, manuals, ground_truths, news = train_all_dataloader.step()
-        do_backprops = torch.logical_not(news)
+        tensor_news = torch.from_numpy(news).bool().to(args.device)
+        do_backprops = torch.logical_not(tensor_news)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         manuals, _ = encoder.encode(manuals)
@@ -112,8 +113,8 @@ def train(args):
         # log evaluation
 
         # reset states if new rollouts started
-        world_model.real_state_reset(tensor_grids, news)
-        world_model.imag_state_reset(tensor_grids, news)
+        world_model.real_state_reset(tensor_grids, tensor_news)
+        world_model.imag_state_reset(tensor_grids, tensor_news)
 
         pbar.update(1)
 

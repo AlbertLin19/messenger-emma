@@ -196,8 +196,8 @@ class BatchedWorldModel(nn.Module):
 
     def real_state_reset(self, init_grids, news):
         if torch.all(news):
-            self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=device)
-            self.real_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=device)
+            self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
+            self.real_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.real_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
         else:
             init_grids = init_grids[news]
@@ -207,8 +207,8 @@ class BatchedWorldModel(nn.Module):
 
     def imag_state_reset(self, init_grids, news):
         if torch.all(news):
-            self.imag_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=device)
-            self.imag_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=device)
+            self.imag_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
+            self.imag_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.imag_old_multilabels = batched_convert_grid_to_multilabel(init_grids)
             self.imag_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
         else:

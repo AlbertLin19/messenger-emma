@@ -43,11 +43,11 @@ def collect_rollouts(env):
     pbar = tqdm(total=len(env.all_games) * len(env.game_variants) * len(env.init_states))
     while True:
         obs, text = env.reset(no_type_p=0, attach_ground_truth=True)
-        text = [sent[0] for sent in text]
+        manual = [sent[0] for sent in text]
         ground_truth = [sent[1] for sent in text]
         obs = wrap_obs(obs)
 
-        manuals.append(text)
+        manuals.append(manual)
         ground_truths.append(ground_truth)
         grid_sequence = [obs]
         action_sequence = []

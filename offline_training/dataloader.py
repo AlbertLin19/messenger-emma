@@ -18,7 +18,7 @@ class DataLoader:
         self.ground_truths_array = np.zeros((self.n_rollouts), dtype=object)
         self.grid_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths), 10, 10, 4), dtype=int)
         self.action_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=int)
-        print('max_rollout_length:', np.max(self.rollout_lengths))
+        print("n_rollouts:", self.n_rollouts, "; max_rollout_length:", np.max(self.rollout_lengths))
         for i in range(self.n_rollouts):
             self.manuals_array[i] = self.data['manuals'][i]
             self.ground_truths_array[i] = self.data['ground_truths'][i]
