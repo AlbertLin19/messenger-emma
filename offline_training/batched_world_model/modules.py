@@ -1,6 +1,6 @@
 import torch.nn as nn
 
-class Encoder(nn.Module):
+class BatchedEncoder(nn.Module):
     def __init__(self, channel_size, latent_size):
         super().__init__()
 
@@ -9,14 +9,14 @@ class Encoder(nn.Module):
             nn.ReLU(),
             nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=4, stride=1),
             nn.ReLU(),
-            nn.Flatten(start_dim=0),
+            nn.Flatten(),
             nn.Linear(in_features=latent_size, out_features=latent_size),
         )
 
     def forward(self, x):
         return self.network(x)
 
-class Decoder(nn.Module):
+class BatchedDecoder(nn.Module):
     def __init__(self, channel_size, latent_size):
         super().__init__()
 
