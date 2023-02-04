@@ -62,8 +62,8 @@ def train(args):
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
     tensor_actions = torch.from_numpy(actions).long().to(args.device)
     manuals, _ = encoder.encode(manuals)
-    world_model.real_state_reset(tensor_grids, np.ones(grids.shape[0], dtype=bool))
-    world_model.imag_state_reset(tensor_grids, np.ones(grids.shape[0], dtype=bool))
+    world_model.real_state_reset(tensor_grids, torch.ones(grids.shape[0], dtype=bool))
+    world_model.imag_state_reset(tensor_grids, torch.ones(grids.shape[0], dtype=bool))
     pbar = tqdm(total=args.max_step)
     while step < args.max_step: # main training loop
         if args.world_model_key_freeze and ((args.world_model_key_unfreeze_step >= 0) and (step >= args.world_model_key_unfreeze_step)):
