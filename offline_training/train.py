@@ -83,13 +83,13 @@ def train(args):
     
         # accumulate gradient
         if args.world_model_loss_source == "real":
-            world_model.real_step(old_tensor_grids, manuals, ground_truths, actions, tensor_grids, do_backprops)
+            world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
             with torch.no_grad():
-                world_model.imag_step(manuals, ground_truths, actions, tensor_grids, do_backprops)
+                world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
         elif args.world_model_loss_source == "imag":
-            world_model.imag_step(manuals, ground_truths, actions, tensor_grids, do_backprops)
+            world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
             with torch.no_grad():
-                world_model.real_step(old_tensor_grids, manuals, ground_truths, actions, tensor_grids, do_backprops)
+                world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
         else:
             raise NotImplementedError
         step += 1    
@@ -100,13 +100,15 @@ def train(args):
                 world_model.real_loss_update()
             elif args.world_model_loss_source == "imag":
                 world_model.imag_loss_update()
+            real_loss = world_model.real_loss_reset()
+            imag_loss = world_model.imag_loss_reset()
             world_model.real_state_detach()
             world_model.imag_state_detach()
             
             updatelog = {
                 "step": step,
-                "real_loss": (world_model.real_loss_total / world_model.real_step_count).item(),
-                "imag_loss": (world_model.imag_loss_total / world_model.imag_step_count).item(),
+                "real_loss": real_loss,
+                "imag_loss": imag_loss,
             }
             wandb.log(updatelog)
 

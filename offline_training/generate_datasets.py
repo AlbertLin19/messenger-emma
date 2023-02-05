@@ -59,7 +59,7 @@ def collect_rollouts(env):
             obs = wrap_obs(obs)
             grid_sequence.append(obs)
             action_sequence.append(action)
-        action_sequence.append(-1)
+        action_sequence.append(0)
 
         grid_sequences.append(grid_sequence)
         action_sequences.append(action_sequence)
