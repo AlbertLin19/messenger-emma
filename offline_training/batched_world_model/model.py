@@ -11,7 +11,7 @@ class BatchedWorldModel(nn.Module):
     def __init__(self, key_type, key_dim, val_type, val_dim, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
-        emb_dim = val_dim # it used to be 17 + val_dim, since torch.cat((multilabel, entity_values), dim=-1) B x 10 x 10 x (17 + val_dim); now, model learns values for empty and avatar, so B x 10 x 10 x val_dim
+        emb_dim = val_dim # it used to be 17 + val_dim, since torch.cat((multilabel, entity_values), dim=-1) B x 10 x 10 x (17 + val_dim); now, model learns values for avatar_no_message and avatar_with_message, so B x 10 x 10 x val_dim
 
         self.latent_size = latent_size 
         self.hidden_size = hidden_size
@@ -43,11 +43,11 @@ class BatchedWorldModel(nn.Module):
         else:
             raise NotImplementedError
 
-        self.empty_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
         self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
         self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
         if val_type == "oracle":
-            pass 
+            self.avatar_no_message_val_emb = torch.tensor([0, 0, 0, 1, 0], device=device)
+            self.avatar_with_message_val_emb = torch.tensor([0, 0, 0, 0, 1], device=device)
         elif val_type == "emma":
             self.txt_val = nn.Linear(768, val_dim).to(device)
             self.scale_val = nn.Sequential(
@@ -97,7 +97,7 @@ class BatchedWorldModel(nn.Module):
             self.is_relevant_cls[torch.tensor([1, 14])] = False
         elif self.prediction_type == "location":
             self.loc_weight = torch.ones(101, device=device)
-            self.loc_weight[-1] = 1 / 4
+            self.loc_weight[-1] = 1 / (4*100)
             self.is_relevant_cls[torch.tensor([0, 1, 14])] = False
         else:
             raise NotImplementedError

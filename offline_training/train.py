@@ -412,14 +412,14 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_key_dim", default=256, type=int, help="World model key embedding dimension.")
     parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
-    parser.add_argument("--world_model_key_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze key module, -1 means never.")
+    parser.add_argument("--world_model_key_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze key module, -1 means never.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_val_freeze", default=False, action="store_true", help="Whether to freeze val module.")
-    parser.add_argument("--world_model_val_unfreeze_step", default=5e6, type=int, help="Train step to unfreeze val module, -1 means never.")
+    parser.add_argument("--world_model_val_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze val module, -1 means never.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_learning_rate", default=0.0001, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_prediction_type", default="location", choices=["existence", "class", "location"], help="What the model predicts.")
     
@@ -429,10 +429,9 @@ if __name__ == "__main__":
     # Training arguments
     parser.add_argument("--max_rollout_length", default=16, type=int, help="Max length of a rollout to train for")
     parser.add_argument("--update_step", default=64, type=int, help="Number of steps before model update")
-    parser.add_argument("--lr", default=5e-5, type=float, help="learning rate")
-    parser.add_argument("--batch_size", default=128, type=int, help="batch_size of training input")
+    parser.add_argument("--batch_size", default=64, type=int, help="batch_size of training input")
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
-    parser.add_argument("--max_step", default=1e10, type=int, help="max training step")
+    parser.add_argument("--max_step", default=1e6, type=int, help="max training step")
 
     # Logging arguments
     parser.add_argument('--eval_step', default=65536, type=int, help='number of steps between evaluations')
@@ -446,7 +445,7 @@ if __name__ == "__main__":
     if args.world_model_key_type == "oracle":
         args.world_model_key_dim = 17
     if args.world_model_val_type == "oracle":
-        args.world_model_val_dim = 3
+        args.world_model_val_dim = 5 # 3 mvmt types + avatar_no_message + avatar_with_message
 
     assert args.eval_length >= args.vis_length
     
