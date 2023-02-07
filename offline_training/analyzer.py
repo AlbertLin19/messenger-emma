@@ -20,7 +20,7 @@ colors = torch.tensor([
 
     
 
-class Stats:
+class Analyzer:
     def __init__(self, eval_length, vis_length):
         self.real_step_count = 0
         self.imag_step_count = 0

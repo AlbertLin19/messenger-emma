@@ -43,18 +43,24 @@ class BatchedWorldModel(nn.Module):
         else:
             raise NotImplementedError
 
-        self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
-        self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
         if val_type == "oracle":
             self.avatar_no_message_val_emb = torch.tensor([0, 0, 0, 1, 0], device=device)
             self.avatar_with_message_val_emb = torch.tensor([0, 0, 0, 0, 1], device=device)
+        
         elif val_type == "emma":
+            self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
+            self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
+        
             self.txt_val = nn.Linear(768, val_dim).to(device)
             self.scale_val = nn.Sequential(
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+
         elif val_type == "emma-mlp_scale":
+            self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
+            self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
+        
             self.txt_val = nn.Linear(768, val_dim).to(device)
             self.scale_val = nn.Sequential(
                 nn.Linear(768, 384),
@@ -62,6 +68,7 @@ class BatchedWorldModel(nn.Module):
                 nn.Linear(384, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+            
         else:
             raise NotImplementedError
 
