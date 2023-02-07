@@ -17,6 +17,7 @@ from transformers import AutoModel, AutoTokenizer
 from messenger.models.utils import BatchedEncoder
 from offline_training.batched_world_model.model import BatchedWorldModel
 from dataloader import DataLoader
+from analyzer import Analyzer
 
 def train(args):
     world_model = BatchedWorldModel(
@@ -40,6 +41,10 @@ def train(args):
 
     with open(args.output + '_architecture.txt', 'w') as f:
         f.write(str(world_model))
+
+    # Analyzers
+    train_all_real_analyzer = Analyzer("real_", args.eval_length, args.vis_length)
+    train_all_imag_analyzer = Analyzer("imag_", args.eval_length, args.vis_length)
 
     # Text Encoder
     encoder_model = AutoModel.from_pretrained("bert-base-uncased")
@@ -83,13 +88,13 @@ def train(args):
     
         # accumulate gradient
         if args.world_model_loss_source == "real":
-            world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
+            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
             with torch.no_grad():
-                world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
+                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
         elif args.world_model_loss_source == "imag":
-            world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
+            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
             with torch.no_grad():
-                world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
+                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, do_backprops)
         else:
             raise NotImplementedError
         step += 1    
@@ -112,7 +117,19 @@ def train(args):
             }
             wandb.log(updatelog)
 
+        # push to analyzers
+        if step % args.eval_step > (args.eval_step - args.eval_length):
+            train_all_real_analyzer.push(*real_results)
+            train_all_imag_analyzer.push(*imag_results)
+
         # log evaluation
+        if step % args.eval_step == 0:
+            eval_log = {
+                "step": step,
+            }
+            eval_log.update(train_all_real_analyzer.getLog())
+            eval_log.update(train_all_imag_analyzer.getLog())
+            wandb.log(eval_log)
 
         # reset states if new rollouts started
         world_model.real_state_reset(tensor_grids, tensor_news)
@@ -134,18 +151,6 @@ def train(args):
 
     #     episodelog = {'step': train_stats.total_steps}
         
-    #     true_real_probs = F.pad(torch.stack(world_model.true_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
-    #     pred_real_probs = F.pad(torch.stack(world_model.pred_real_probs, dim=0), (0, 0, 1, 1, 1, 1))
-    #     real_probs = torch.cat((true_real_probs, pred_real_probs), dim=2)
-    #     episodelog.update({f'real_prob_{i}': wandb.Video((255*real_probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-    #     episodelog.update({'real_probs': wandb.Video(torch.sum(real_probs.unsqueeze(-1)*colors, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
-
-    #     true_real_multilabels = F.pad(torch.stack(world_model.true_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-    #     pred_real_multilabels = F.pad(torch.stack(world_model.pred_real_multilabels, dim=0), (0, 0, 1, 1, 1, 1))
-    #     real_multilabels = torch.cat((true_real_multilabels, pred_real_multilabels), dim=2)
-    #     episodelog.update({f'real_multilabel_{i}': wandb.Video((255*real_multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-    #     episodelog.update({'real_multilabels': wandb.Video(torch.min(torch.sum(real_multilabels.unsqueeze(-1)*colors, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
-
     #     true_imag_probs = F.pad(torch.stack(world_model.true_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
     #     pred_imag_probs = F.pad(torch.stack(world_model.pred_imag_probs, dim=0), (0, 0, 1, 1, 1, 1))
     #     imag_probs = torch.cat((true_imag_probs, pred_imag_probs), dim=2)
@@ -434,8 +439,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_step", default=1e6, type=int, help="max training step")
 
     # Logging arguments
-    parser.add_argument('--eval_step', default=65536, type=int, help='number of steps between evaluations')
-    parser.add_argument('--eval_length', default=1024, type=int, help='number of steps to run evaluation')
+    parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
+    parser.add_argument('--eval_length', default=16, type=int, help='number of steps to run evaluation')
     parser.add_argument('--vis_length', default=16, type=int, help='number of steps to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
 

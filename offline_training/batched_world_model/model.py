@@ -247,6 +247,11 @@ class BatchedWorldModel(nn.Module):
         self.real_loss_total += n_backprops*loss
         self.real_backprop_count += n_backprops
 
+        with torch.no_grad():
+            pred_probs, pred_nonexistence_probs = self.logit_to_prob(pred_logits, pred_nonexistence_logits)
+            pred_multilabels = batched_convert_prob_to_multilabel(pred_probs, pred_nonexistence_probs, self.prediction_type, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.real_entity_ids)
+        return (pred_probs, pred_nonexistence_probs), pred_multilabels, probs, multilabels
+
     def imag_step(self, manuals, ground_truths, actions, grids, do_backprops):
         backprop_idxs = do_backprops.argwhere().squeeze(-1)
         old_multilabels = self.imag_old_multilabels
@@ -258,10 +263,12 @@ class BatchedWorldModel(nn.Module):
         n_backprops = torch.sum(do_backprops)
         self.imag_loss_total += n_backprops*loss
         self.imag_backprop_count += n_backprops
+
         with torch.no_grad():
             pred_probs, pred_nonexistence_probs = self.logit_to_prob(pred_logits, pred_nonexistence_logits)
             pred_multilabels = batched_convert_prob_to_multilabel(pred_probs, pred_nonexistence_probs, self.prediction_type, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.imag_entity_ids)
             self.imag_old_multilabels = pred_multilabels
+        return (pred_probs, pred_nonexistence_probs), pred_multilabels, probs, multilabels
 
     def real_loss_update(self):
         self.optimizer.zero_grad()
