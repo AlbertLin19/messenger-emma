@@ -424,7 +424,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze val module, -1 means never.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.0001, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_prediction_type", default="location", choices=["existence", "class", "location"], help="What the model predicts.")
     
@@ -436,7 +436,7 @@ if __name__ == "__main__":
     parser.add_argument("--update_step", default=64, type=int, help="Number of steps before model update")
     parser.add_argument("--batch_size", default=64, type=int, help="batch_size of training input")
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
-    parser.add_argument("--max_step", default=1e6, type=int, help="max training step")
+    parser.add_argument("--max_step", default=1e7, type=int, help="max training step")
 
     # Logging arguments
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
