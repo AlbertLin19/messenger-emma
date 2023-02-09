@@ -33,7 +33,8 @@ class DataLoader:
 
     def step(self):
         self.remaining_lengths -= 1
-        news = self.remaining_lengths < 0
-        self.indices[news] = np.random.randint(low=0, high=self.n_rollouts, size=np.sum(news))
-        self.remaining_lengths[news] = self.rollout_lengths[self.indices[news]] - 1
-        return self.grid_sequences_array[self.indices, self.rollout_lengths[self.indices] - self.remaining_lengths - 1], self.action_sequences_array[self.indices, self.rollout_lengths[self.indices] - self.remaining_lengths - 1], self.manuals_array[self.indices], self.ground_truths_array[self.indices], news
+        new_idxs = np.argwhere(self.remaining_lengths < 0).squeeze(-1)
+        cur_idxs = np.argwhere(self.remaining_lengths >= 0).squeeze(-1)
+        self.indices[new_idxs] = np.random.randint(low=0, high=self.n_rollouts, size=len(new_idxs))
+        self.remaining_lengths[new_idxs] = self.rollout_lengths[self.indices[new_idxs]] - 1
+        return self.grid_sequences_array[self.indices, self.rollout_lengths[self.indices] - self.remaining_lengths - 1], self.action_sequences_array[self.indices, self.rollout_lengths[self.indices] - self.remaining_lengths - 1], self.manuals_array[self.indices], self.ground_truths_array[self.indices], (new_idxs, cur_idxs)

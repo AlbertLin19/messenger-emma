@@ -47,8 +47,8 @@ def batched_ground(manuals, ground_truths, world_model):
 
 def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world_model):
     if world_model.val_type == "oracle":
-        # multiply one_hot to cancel the subsequent averaging over descriptions
-        values = manuals.shape[1]*F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=5)
+        # scale one_hot to cancel the subsequent averaging over descriptions
+        values = manuals.shape[1]*F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=4)
     elif "emma" in world_model.val_type:
         values = world_model.txt_val(manuals)                                        # B x n_sent x sent_len x val_dim
         val_scales = world_model.scale_val(manuals)                                  # B x n_sent x sent_len x 1
@@ -66,7 +66,7 @@ def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world
     entity_values[:, 16] = world_model.avatar_with_message_val_emb
     entity_values = entity_values.unsqueeze(-3).unsqueeze(-3)*multilabels[..., None] # B x 10 x 10 x 17 x val_dim
     entity_values = torch.sum(entity_values, dim=-2)                                 # B x 10 x 10 x val_dim
-    return entity_values # it used to be torch.cat((multilabels, entity_values), dim=-1) with emb_dim = val_dim + 17
+    return torch.cat((multilabels[..., world_model.relevant_cls_idxs], entity_values), dim=-1)
 
 def batched_convert_prob_to_multilabel(probs, nonexistence_probs, prediction_type, threshold, refine, entity_ids):
     if prediction_type == "existence":

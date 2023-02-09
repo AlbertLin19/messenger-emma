@@ -25,10 +25,11 @@ COLORS = torch.tensor([
     
 
 class Analyzer:
-    def __init__(self, log_prefix, eval_length, vis_length):
+    def __init__(self, log_prefix, eval_length, vis_length, relevant_cls_idxs):
         self.log_prefix = log_prefix
         self.eval_length = eval_length
         self.vis_length = vis_length
+        self.relevant_cls_idxs = relevant_cls_idxs
 
         self.pred_probs_for_vid = []
         self.pred_multilabels_for_vid = []
@@ -76,14 +77,14 @@ class Analyzer:
         true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         probs = torch.cat((true_probs, pred_probs), dim=2)
-        log.update({f'prob_{i}': wandb.Video((255*probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-        log.update({'probs': wandb.Video(torch.sum(probs.unsqueeze(-1)*COLORS, dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+        log.update({f'prob_{i}': wandb.Video((255*probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
+        log.update({'probs': wandb.Video(torch.sum((probs.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
 
         true_multilabels = F.pad(torch.stack(self.true_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         pred_multilabels = F.pad(torch.stack(self.pred_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         multilabels = torch.cat((true_multilabels, pred_multilabels), dim=2)
-        log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in range(17)})
-        log.update({'multilabels': wandb.Video(torch.min(torch.sum(multilabels.unsqueeze(-1)*COLORS, dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
+        log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
+        log.update({'multilabels': wandb.Video(torch.min(torch.sum((multilabels.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)

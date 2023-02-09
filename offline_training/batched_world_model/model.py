@@ -11,8 +11,6 @@ class BatchedWorldModel(nn.Module):
     def __init__(self, key_type, key_dim, val_type, val_dim, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
-        emb_dim = val_dim # it used to be 17 + val_dim, since torch.cat((multilabel, entity_values), dim=-1) B x 10 x 10 x (17 + val_dim); now, model learns values for avatar_no_message and avatar_with_message, so B x 10 x 10 x val_dim
-
         self.latent_size = latent_size 
         self.hidden_size = hidden_size
         self.batch_size = batch_size
@@ -22,6 +20,7 @@ class BatchedWorldModel(nn.Module):
 
         if key_type == "oracle":
             self.sprite_emb = lambda x: F.one_hot(x, num_classes=17).float()
+
         elif key_type == "emma":
             self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
             self.attn_scale = np.sqrt(key_dim)
@@ -30,6 +29,7 @@ class BatchedWorldModel(nn.Module):
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+
         elif key_type == "emma-mlp_scale":
             self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
             self.attn_scale = np.sqrt(key_dim)
@@ -40,12 +40,13 @@ class BatchedWorldModel(nn.Module):
                 nn.Linear(384, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
+
         else:
             raise NotImplementedError
 
         if val_type == "oracle":
-            self.avatar_no_message_val_emb = torch.tensor([0, 0, 0, 1, 0], device=device)
-            self.avatar_with_message_val_emb = torch.tensor([0, 0, 0, 0, 1], device=device)
+            self.avatar_no_message_val_emb = torch.tensor([0, 0, 0, 1], device=device)
+            self.avatar_with_message_val_emb = torch.tensor([0, 0, 0, 1], device=device)
         
         elif val_type == "emma":
             self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
@@ -72,6 +73,26 @@ class BatchedWorldModel(nn.Module):
         else:
             raise NotImplementedError
 
+        self.prediction_type = prediction_type
+        if self.prediction_type == "existence":
+            self.pos_weight = 10*torch.ones(17, device=device)
+            self.pos_weight[0] = 3 / 100
+            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
+
+        elif self.prediction_type == "class":
+            self.cls_weight = torch.ones(17, device=device)
+            self.cls_weight[0] = 3 / 100
+            self.relevant_cls_idxs = torch.tensor([0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
+
+        elif self.prediction_type == "location":
+            self.loc_weight = torch.ones(101, device=device)
+            self.loc_weight[-1] = 1 / (4*1)
+            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
+
+        else:
+            raise NotImplementedError
+
+        emb_dim = val_dim + len(self.relevant_cls_idxs)
         self.encoder = BatchedEncoder(emb_dim, latent_size).to(device)
         self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
         self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
@@ -79,9 +100,9 @@ class BatchedWorldModel(nn.Module):
             self.nonexistence = nn.Linear(in_features=latent_size, out_features=17).to(device)
         self.decoder = BatchedDecoder(emb_dim, latent_size).to(device)
         self.detector = nn.Sequential(
-            nn.Conv2d(in_channels=emb_dim, out_channels=emb_dim//2, kernel_size=1, stride=1),
+            nn.Conv2d(in_channels=emb_dim, out_channels=(emb_dim + 17) // 2, kernel_size=1, stride=1),
             nn.ReLU(),
-            nn.Conv2d(in_channels=emb_dim//2, out_channels=17, kernel_size=1, stride=1),
+            nn.Conv2d(in_channels=(emb_dim + 17) // 2, out_channels=17, kernel_size=1, stride=1),
         ).to(device)
         
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
@@ -89,29 +110,10 @@ class BatchedWorldModel(nn.Module):
         self.real_backprop_count = 0
         self.imag_loss_total = 0
         self.imag_backprop_count = 0
-        
-        self.device = device
-
-        self.is_relevant_cls = torch.ones(17, dtype=bool, device=device)
-        self.prediction_type = prediction_type
-        if self.prediction_type == "existence":
-            self.pos_weight = 10*torch.ones(17, device=device)
-            self.pos_weight[0] = 3 / 100
-            self.is_relevant_cls[torch.tensor([0, 1, 14])] = False
-        elif self.prediction_type == "class":
-            self.cls_weight = torch.ones(17, device=device)
-            self.cls_weight[0] = 3 / 100
-            self.is_relevant_cls[torch.tensor([1, 14])] = False
-        elif self.prediction_type == "location":
-            self.loc_weight = torch.ones(101, device=device)
-            self.loc_weight[-1] = 1 / (4*100)
-            self.is_relevant_cls[torch.tensor([0, 1, 14])] = False
-        else:
-            raise NotImplementedError
-        self.relevant_cls_idxs = self.is_relevant_cls.argwhere().squeeze(-1)
 
         self.pred_multilabel_threshold = pred_multilabel_threshold
-        self.refine_pred_multilabel = refine_pred_multilabel
+        self.refine_pred_multilabel = refine_pred_multilabel        
+        self.device = device
 
     def freeze_key(self):
         for param in self.sprite_emb.parameters():
@@ -202,29 +204,29 @@ class BatchedWorldModel(nn.Module):
             raise NotImplementedError
         return probs
 
-    def real_state_reset(self, init_grids, news):
-        if torch.all(news):
+    def real_state_reset(self, init_grids, idxs=None):
+        if idxs is None:
             self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.real_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.real_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
         else:
-            init_grids = init_grids[news]
-            self.real_hidden_states[:, news] = torch.zeros((1, 1, self.hidden_size), device=self.device)
-            self.real_cell_states[:, news] = torch.zeros((1, 1, self.hidden_size), device=self.device)
-            self.real_entity_ids[news] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values      
+            init_grids = init_grids[idxs]
+            self.real_hidden_states[:, idxs] = 0
+            self.real_cell_states[:, idxs] = 0
+            self.real_entity_ids[idxs] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values      
 
-    def imag_state_reset(self, init_grids, news):
-        if torch.all(news):
+    def imag_state_reset(self, init_grids, idxs=None):
+        if idxs is None:
             self.imag_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.imag_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.imag_old_multilabels = batched_convert_grid_to_multilabel(init_grids)
             self.imag_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
         else:
-            init_grids = init_grids[news]
-            self.imag_hidden_states[:, news] = torch.zeros((1, 1, self.hidden_size), device=self.device)
-            self.imag_cell_states[:, news] = torch.zeros((1, 1, self.hidden_size), device=self.device)
-            self.imag_old_multilabels[news] = batched_convert_grid_to_multilabel(init_grids)
-            self.imag_entity_ids[news] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            init_grids = init_grids[idxs]
+            self.imag_hidden_states[:, idxs] = 0
+            self.imag_cell_states[:, idxs] = 0
+            self.imag_old_multilabels[idxs] = batched_convert_grid_to_multilabel(init_grids)
+            self.imag_entity_ids[idxs] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
 
     def real_state_detach(self):
         self.real_hidden_states = self.real_hidden_states.detach()
@@ -235,15 +237,14 @@ class BatchedWorldModel(nn.Module):
         self.imag_cell_states = self.imag_cell_states.detach()
         self.imag_old_multilabels = self.imag_old_multilabels.detach()
 
-    def real_step(self, old_grids, manuals, ground_truths, actions, grids, do_backprops):
-        backprop_idxs = do_backprops.argwhere().squeeze(-1)
+    def real_step(self, old_grids, manuals, ground_truths, actions, grids, backprop_idxs):
         old_multilabels = batched_convert_grid_to_multilabel(old_grids)
         multilabels = batched_convert_grid_to_multilabel(grids)
         probs = self.multilabel_to_prob(multilabels)
 
         (pred_logits, pred_nonexistence_logits), (self.real_hidden_states, self.real_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.real_hidden_states, self.real_cell_states))
         loss = self.loss(pred_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
-        n_backprops = torch.sum(do_backprops)
+        n_backprops = len(backprop_idxs)
         self.real_loss_total += n_backprops*loss
         self.real_backprop_count += n_backprops
 
@@ -252,15 +253,14 @@ class BatchedWorldModel(nn.Module):
             pred_multilabels = batched_convert_prob_to_multilabel(pred_probs, pred_nonexistence_probs, self.prediction_type, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.real_entity_ids)
         return (pred_probs, pred_nonexistence_probs), pred_multilabels, probs, multilabels
 
-    def imag_step(self, manuals, ground_truths, actions, grids, do_backprops):
-        backprop_idxs = do_backprops.argwhere().squeeze(-1)
+    def imag_step(self, manuals, ground_truths, actions, grids, backprop_idxs):
         old_multilabels = self.imag_old_multilabels
         multilabels = batched_convert_grid_to_multilabel(grids)
         probs = self.multilabel_to_prob(multilabels)
 
         (pred_logits, pred_nonexistence_logits), (self.imag_hidden_states, self.imag_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.imag_hidden_states, self.imag_cell_states))
         loss = self.loss(pred_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
-        n_backprops = torch.sum(do_backprops)
+        n_backprops = len(backprop_idxs)
         self.imag_loss_total += n_backprops*loss
         self.imag_backprop_count += n_backprops
 
