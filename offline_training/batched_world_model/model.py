@@ -86,7 +86,6 @@ class BatchedWorldModel(nn.Module):
 
         elif self.prediction_type == "location":
             self.loc_weight = torch.ones(101, device=device)
-            self.loc_weight[-1] = 1 / (4*1)
             self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
 
         else:

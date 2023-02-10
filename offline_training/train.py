@@ -42,9 +42,27 @@ def train(args):
     with open(args.output + '_architecture.txt', 'w') as f:
         f.write(str(world_model))
 
+    eval_world_model = BatchedWorldModel(
+        key_type=args.world_model_key_type,
+        key_dim=args.world_model_key_dim,
+        val_type=args.world_model_val_type,
+        val_dim=args.world_model_val_dim,
+        latent_size=args.world_model_latent_size,
+        hidden_size=args.world_model_hidden_size,
+        batch_size=args.batch_size,
+        learning_rate=args.world_model_learning_rate,
+        prediction_type=args.world_model_prediction_type,
+        pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
+        refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+        device=args.device
+    )
+    eval_world_model.load_state_dict(world_model.state_dict())
+
     # Analyzers
     train_all_real_analyzer = Analyzer("real_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
     train_all_imag_analyzer = Analyzer("imag_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
+    val_same_worlds_real_analyzer = Analyzer("val_real_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
+    val_same_worlds_imag_analyzer = Analyzer("val_imag_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
 
     # Text Encoder
     encoder_model = AutoModel.from_pretrained("bert-base-uncased")
@@ -69,6 +87,14 @@ def train(args):
     manuals, _ = encoder.encode(manuals)
     world_model.real_state_reset(tensor_grids)
     world_model.imag_state_reset(tensor_grids)
+
+    val_grids, val_actions, val_manuals, val_ground_truths = val_same_worlds_dataloader.reset()
+    val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
+    val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
+    val_manuals, _ = encoder.encode(val_manuals)
+    eval_world_model.real_state_reset(val_tensor_grids)
+    eval_world_model.imag_state_reset(val_tensor_grids)
+
     pbar = tqdm(total=args.max_step)
     while step < args.max_step: # main training loop
         if args.world_model_key_freeze and ((args.world_model_key_unfreeze_step >= 0) and (step >= args.world_model_key_unfreeze_step)):
@@ -107,6 +133,8 @@ def train(args):
             imag_loss = world_model.imag_loss_reset()
             world_model.real_state_detach()
             world_model.imag_state_detach()
+
+            eval_world_model.load_state_dict(world_model.state_dict())
             
             updatelog = {
                 "step": step,
@@ -115,26 +143,44 @@ def train(args):
             }
             wandb.log(updatelog)
 
-        # push to analyzers
+        # reset states if new rollouts started
+        world_model.real_state_reset(tensor_grids, new_idxs)
+        world_model.imag_state_reset(tensor_grids, new_idxs)
+
+        # push to analyzers and run eval
         if step % args.eval_step > (args.eval_step - args.eval_length):
             train_all_real_analyzer.push(*real_results)
             train_all_imag_analyzer.push(*imag_results)
 
-        # log evaluation
+            with torch.no_grad():
+                val_old_tensor_grids = val_tensor_grids
+                val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs) = val_same_worlds_dataloader.step()
+                val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
+                val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
+                val_manuals, _ = encoder.encode(val_manuals)
+            
+                val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+                val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+
+                # reset states if new rollouts started
+                eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
+                eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
+
+            val_same_worlds_real_analyzer.push(*val_real_results)
+            val_same_worlds_imag_analyzer.push(*val_imag_results)
+
+        # log results
         if step % args.eval_step == 0:
             eval_log = {
                 "step": step,
             }
             eval_log.update(train_all_real_analyzer.getLog())
             eval_log.update(train_all_imag_analyzer.getLog())
+            eval_log.update(val_same_worlds_real_analyzer.getLog())
+            eval_log.update(val_same_worlds_imag_analyzer.getLog())
             wandb.log(eval_log)
 
-        # reset states if new rollouts started
-        world_model.real_state_reset(tensor_grids, new_idxs)
-        world_model.imag_state_reset(tensor_grids, new_idxs)
-
         pbar.update(1)
-
         # check if max_time has elapsed
         if time.time() - start_time > 60 * 60 * args.max_time:
             break
@@ -162,7 +208,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze val module, -1 means never.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_learning_rate", default=0.001, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_prediction_type", default="location", choices=["existence", "class", "location"], help="What the model predicts.")
     

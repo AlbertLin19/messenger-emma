@@ -5,7 +5,7 @@ class BatchedEncoder(nn.Module):
         super().__init__()
 
         self.network = nn.Sequential(
-            nn.Conv2d(in_channels=channel_size, out_channels=latent_size, kernel_size=3, stride=2),
+            nn.Conv2d(in_channels=channel_size, out_channels=latent_size, kernel_size=3, stride=2, padding=2),
             nn.ReLU(),
             nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=4, stride=1),
             nn.ReLU(),
