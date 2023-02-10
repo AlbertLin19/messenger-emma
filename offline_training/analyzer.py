@@ -29,7 +29,7 @@ class Analyzer:
         self.log_prefix = log_prefix
         self.eval_length = eval_length
         self.vis_length = vis_length
-        self.relevant_cls_idxs = relevant_cls_idxs
+        self.relevant_cls_idxs = relevant_cls_idxs.cpu()
 
         self.pred_probs_for_vid = []
         self.pred_multilabels_for_vid = []
