@@ -123,6 +123,17 @@ def train(args):
             raise NotImplementedError
         step += 1    
 
+        # run eval
+        with torch.no_grad():
+            val_old_tensor_grids = val_tensor_grids
+            val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs) = val_same_worlds_dataloader.step()
+            val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
+            val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
+            val_manuals, _ = encoder.encode(val_manuals)
+        
+            val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+            val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+
         # perform update
         if step % args.update_step == 0:
             if args.world_model_loss_source == "real":
@@ -134,38 +145,31 @@ def train(args):
             world_model.real_state_detach()
             world_model.imag_state_detach()
 
+            val_real_loss = eval_world_model.real_loss_reset()
+            val_imag_loss = eval_world_model.imag_loss_reset()
+            eval_world_model.real_state_detach()
+            eval_world_model.imag_state_detach()
             eval_world_model.load_state_dict(world_model.state_dict())
             
             updatelog = {
                 "step": step,
                 "real_loss": real_loss,
                 "imag_loss": imag_loss,
+                "val_real_loss": val_real_loss,
+                "val_imag_loss": val_imag_loss,
             }
             wandb.log(updatelog)
 
         # reset states if new rollouts started
         world_model.real_state_reset(tensor_grids, new_idxs)
         world_model.imag_state_reset(tensor_grids, new_idxs)
+        eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
+        eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
 
-        # push to analyzers and run eval
+        # push results to analyzers
         if step % args.eval_step > (args.eval_step - args.eval_length):
             train_all_real_analyzer.push(*real_results)
             train_all_imag_analyzer.push(*imag_results)
-
-            with torch.no_grad():
-                val_old_tensor_grids = val_tensor_grids
-                val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs) = val_same_worlds_dataloader.step()
-                val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
-                val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-                val_manuals, _ = encoder.encode(val_manuals)
-            
-                val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-                val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-
-                # reset states if new rollouts started
-                eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
-                eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
-
             val_same_worlds_real_analyzer.push(*val_real_results)
             val_same_worlds_imag_analyzer.push(*val_imag_results)
 
