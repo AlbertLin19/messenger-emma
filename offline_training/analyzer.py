@@ -36,27 +36,25 @@ class Analyzer:
         self.true_probs_for_vid = []
         self.true_multilabels_for_vid = []
 
-        # self.real_step_count = 0
-        # self.imag_step_count = 0
-        # self.real_loss_total = 0
-        # self.imag_loss_total = 0
-
-        # self.real_tp = torch.zeros(17, dtype=int, device=device)
-        # self.real_fn = torch.zeros(17, dtype=int, device=device)
-        # self.real_fp = torch.zeros(17, dtype=int, device=device)
-        # self.real_tn = torch.zeros(17, dtype=int, device=device)
-
-        # self.imag_tp = torch.zeros(17, dtype=int, device=device)
-        # self.imag_fn = torch.zeros(17, dtype=int, device=device)
-        # self.imag_fp = torch.zeros(17, dtype=int, device=device)
-        # self.imag_tn = torch.zeros(17, dtype=int, device=device)
-
-        # self.real_dists = []
-        # self.imag_dists = []
+        self.tps = []
+        self.fns = []
+        self.fps = []
 
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
         with torch.no_grad():
+            # calculate confusions
+            confusions = pred_multilabels / true_multilabels # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            self.tps.append(torch.sum(confusions == 1, dim=(0, 1, 2)))            
+            if len(self.tps) > self.eval_length:
+                self.tps.pop(0)
+            self.fns.append(torch.sum(confusions == 0, dim=(0, 1, 2)))
+            if len(self.fns) > self.eval_length:
+                self.fns.pop(0)
+            self.fps.append(torch.sum(confusions == float('inf'), dim=(0, 1, 2)))
+            if len(self.fps) > self.eval_length:
+                self.fps.pop(0)
+
             # store single frame for each videos
             self.pred_probs_for_vid.append(pred_probs[0].cpu())
             if len(self.pred_probs_for_vid) > self.vis_length:
@@ -74,6 +72,30 @@ class Analyzer:
     def getLog(self):
         log = {}
 
+        # calculate recall, precision, f1
+        tp = torch.stack(self.tps, dim=0).sum(dim=0)
+        fn = torch.stack(self.fns, dim=0).sum(dim=0)
+        fp = torch.stack(self.fps, dim=0).sum(dim=0)
+        recall = tp / (tp + fn)
+        precision = tp / (tp + fp)
+        f1 = (2 * recall * precision) / (recall + precision)
+        sprite_idxs = self.relevant_cls_idxs[((self.relevant_cls_idxs != 0)*(self.relevant_cls_idxs != 1)*(self.relevant_cls_idxs != 14)).argwhere().squeeze(-1)]
+        entity_idxs = sprite_idxs[((sprite_idxs != 15)*(sprite_idxs != 16)).argwhere().squeeze(-1)]
+        log.update({
+            'recall_sprite': recall[sprite_idxs].nanmean(),
+            'precision_sprite': precision[sprite_idxs].nanmean(),
+            'f1_sprite': f1[sprite_idxs].nanmean(),
+            'recall_entity': recall[entity_idxs].nanmean(),
+            'precision_entity': precision[entity_idxs].nanmean(),
+            'f1_entity': f1[entity_idxs].nanmean(),
+            'recall_avatar': recall[15:17].nanmean(),
+            'precision_avatar': precision[15:17].nanmean(),
+            'f1_avatar': f1[15:17].nanmean(),
+        })
+        log.update({f'recall_{i}': recall[i] for i in self.relevant_cls_idxs})
+        log.update({f'precision_{i}': precision[i] for i in self.relevant_cls_idxs})
+        log.update({f'f1_{i}': f1[i] for i in self.relevant_cls_idxs})
+        
         true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         probs = torch.cat((true_probs, pred_probs), dim=2)
