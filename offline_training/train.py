@@ -221,8 +221,8 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_path", default="datasets/stage_2_same_worlds_dataset.pickle", help="path to the dataset file")
       
     # Training arguments
-    parser.add_argument("--max_rollout_length", default=64, type=int, help="Max length of a rollout to train for")
-    parser.add_argument("--update_step", default=64, type=int, help="Number of steps before model update")
+    parser.add_argument("--max_rollout_length", default=32, type=int, help="Max length of a rollout to train for")
+    parser.add_argument("--update_step", default=32, type=int, help="Number of steps before model update")
     parser.add_argument("--batch_size", default=64, type=int, help="batch_size of training input")
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
     parser.add_argument("--max_step", default=1e7, type=int, help="max training step")

@@ -35,12 +35,13 @@ def wrap_obs(obs):
     )
 
 
-def collect_rollouts(env):
+def collect_rollouts(env, n_sets_total, max_rollout_length):
     manuals = []
     ground_truths = []
     grid_sequences = []
     action_sequences = []
-    pbar = tqdm(total=len(env.all_games) * len(env.game_variants) * len(env.init_states))
+    pbar = tqdm(total = n_sets_total * len(env.all_games) * len(env.game_variants) * len(env.init_states))
+    n_sets = 0
     while True:
         obs, text = env.reset(no_type_p=0, attach_ground_truth=True)
         manual = [sent[0] for sent in text]
@@ -53,7 +54,11 @@ def collect_rollouts(env):
         action_sequence = []
         
         done = False
+        step = 1
         while not done:
+            if step >= max_rollout_length:
+                break
+            step += 1
             action = random.choice(range(5))
             obs, reward, done, _ = env.step(action)
             obs = wrap_obs(obs)
@@ -65,14 +70,16 @@ def collect_rollouts(env):
         action_sequences.append(action_sequence)
         pbar.update(1)
         if (env.next_game_idx == 0) and (env.next_variant_idx == 0) and (env.next_init_state_idx == 0):
-            break
+            n_sets += 1
+            if n_sets >= n_sets_total:
+                break
     pbar.close()
     return manuals, ground_truths, grid_sequences, action_sequences
 
-train_all_manuals, train_all_ground_truths, train_all_grid_sequences, train_all_action_sequences = collect_rollouts(train_all_env)
-val_same_worlds_manuals, val_same_worlds_ground_truths, val_same_worlds_grid_sequences, val_same_worlds_action_sequences = collect_rollouts(val_same_worlds_env)
-test_same_worlds_se_manuals, test_same_worlds_se_ground_truths, test_same_worlds_se_grid_sequences, test_same_worlds_se_action_sequences = collect_rollouts(test_same_worlds_se_env)
-test_same_worlds_manuals, test_same_worlds_ground_truths, test_same_worlds_grid_sequences, test_same_worlds_action_sequences = collect_rollouts(test_same_worlds_env)
+train_all_manuals, train_all_ground_truths, train_all_grid_sequences, train_all_action_sequences = collect_rollouts(train_all_env, 8, 32)
+val_same_worlds_manuals, val_same_worlds_ground_truths, val_same_worlds_grid_sequences, val_same_worlds_action_sequences = collect_rollouts(val_same_worlds_env, 1, 32)
+test_same_worlds_se_manuals, test_same_worlds_se_ground_truths, test_same_worlds_se_grid_sequences, test_same_worlds_se_action_sequences = collect_rollouts(test_same_worlds_se_env, 1, 32)
+test_same_worlds_manuals, test_same_worlds_ground_truths, test_same_worlds_grid_sequences, test_same_worlds_action_sequences = collect_rollouts(test_same_worlds_env, 1, 32)
 
 dataset = {
     'train_all': {
