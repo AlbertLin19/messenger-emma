@@ -123,17 +123,6 @@ def train(args):
             raise NotImplementedError
         step += 1    
 
-        # run eval
-        with torch.no_grad():
-            val_old_tensor_grids = val_tensor_grids
-            val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs) = val_same_worlds_dataloader.step()
-            val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
-            val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-            val_manuals, _ = encoder.encode(val_manuals)
-        
-            val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-            val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-
         # perform update
         if step % args.update_step == 0:
             if args.world_model_loss_source == "real":
@@ -145,38 +134,50 @@ def train(args):
             world_model.real_state_detach()
             world_model.imag_state_detach()
 
-            val_real_loss = eval_world_model.real_loss_reset()
-            val_imag_loss = eval_world_model.imag_loss_reset()
-            eval_world_model.real_state_detach()
-            eval_world_model.imag_state_detach()
             eval_world_model.load_state_dict(world_model.state_dict())
             
             updatelog = {
                 "step": step,
                 "real_loss": real_loss,
                 "imag_loss": imag_loss,
-                "val_real_loss": val_real_loss,
-                "val_imag_loss": val_imag_loss,
             }
             wandb.log(updatelog)
 
         # reset states if new rollouts started
         world_model.real_state_reset(tensor_grids, new_idxs)
         world_model.imag_state_reset(tensor_grids, new_idxs)
-        eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
-        eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
 
-        # push results to analyzers
+        # push results to analyzers and run eval
         if step % args.eval_step > (args.eval_step - args.eval_length):
             train_all_real_analyzer.push(*real_results)
             train_all_imag_analyzer.push(*imag_results)
+
+            # run eval
+            with torch.no_grad():
+                val_old_tensor_grids = val_tensor_grids
+                val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs) = val_same_worlds_dataloader.step()
+                val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
+                val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
+                val_manuals, _ = encoder.encode(val_manuals)
+            
+                val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+                val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+
+                # reset states if new rollouts started
+                eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
+                eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
+
             val_same_worlds_real_analyzer.push(*val_real_results)
             val_same_worlds_imag_analyzer.push(*val_imag_results)
 
         # log results
         if step % args.eval_step == 0:
+            val_real_loss = eval_world_model.real_loss_reset()
+            val_imag_loss = eval_world_model.imag_loss_reset()
             eval_log = {
                 "step": step,
+                "val_real_loss": val_real_loss,
+                "val_imag_loss": val_imag_loss,
             }
             eval_log.update(train_all_real_analyzer.getLog())
             eval_log.update(train_all_imag_analyzer.getLog())
@@ -212,7 +213,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze val module, -1 means never.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.001, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_prediction_type", default="location", choices=["existence", "class", "location"], help="What the model predicts.")
     
