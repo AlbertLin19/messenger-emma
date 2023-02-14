@@ -201,7 +201,8 @@ if __name__ == "__main__":
 
     # World model arguments
     parser.add_argument("--world_model_pred_multilabel_threshold", default=0.5, type=float, help="Probability threshold to predict existence of a sprite in pred_multilabel when prediction_type == 'existence'.")
-    parser.add_argument("--world_model_refine_pred_multilabel", default=True, action="store_true", help="Whether to refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
+    parser.add_argument("--world_model_refine_pred_multilabel", default=True, action="store_true", help="Refine pred_multilabel by keeping <=1 of each sprite, exactly 1 avatar, and no entities known to not exist in the level.")
+    parser.add_argument("--world_model_no_refine_pred_multilabel", dest="world_model_refine_pred_multilabel", action="store_false", help="Do not refine pred_multilabel.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_key_dim", default=256, type=int, help="World model key embedding dimension.")
     parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' key tokens.")
