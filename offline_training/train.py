@@ -23,6 +23,7 @@ def train(args):
     world_model = BatchedWorldModel(
         key_type=args.world_model_key_type,
         key_dim=args.world_model_key_dim,
+        key_temp=args.world_model_key_temp,
         val_type=args.world_model_val_type,
         val_dim=args.world_model_val_dim,
         latent_size=args.world_model_latent_size,
@@ -45,6 +46,7 @@ def train(args):
     eval_world_model = BatchedWorldModel(
         key_type=args.world_model_key_type,
         key_dim=args.world_model_key_dim,
+        key_temp=args.world_model_key_temp,
         val_type=args.world_model_val_type,
         val_dim=args.world_model_val_dim,
         latent_size=args.world_model_latent_size,
@@ -208,6 +210,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
     parser.add_argument("--world_model_key_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze key module, -1 means never.")
+    parser.add_argument("--world_model_key_temp", default=100, type=float, help="Temperature of key attention.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_val_freeze", default=False, action="store_true", help="Whether to freeze val module.")

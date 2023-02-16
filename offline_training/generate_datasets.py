@@ -76,7 +76,7 @@ def collect_rollouts(env, n_sets_total, max_rollout_length):
     pbar.close()
     return manuals, ground_truths, grid_sequences, action_sequences
 
-train_all_manuals, train_all_ground_truths, train_all_grid_sequences, train_all_action_sequences = collect_rollouts(train_all_env, 8, 32)
+train_all_manuals, train_all_ground_truths, train_all_grid_sequences, train_all_action_sequences = collect_rollouts(train_all_env, 32, 32)
 val_same_worlds_manuals, val_same_worlds_ground_truths, val_same_worlds_grid_sequences, val_same_worlds_action_sequences = collect_rollouts(val_same_worlds_env, 1, 32)
 test_same_worlds_se_manuals, test_same_worlds_se_ground_truths, test_same_worlds_se_grid_sequences, test_same_worlds_se_action_sequences = collect_rollouts(test_same_worlds_se_env, 1, 32)
 test_same_worlds_manuals, test_same_worlds_ground_truths, test_same_worlds_grid_sequences, test_same_worlds_action_sequences = collect_rollouts(test_same_worlds_env, 1, 32)

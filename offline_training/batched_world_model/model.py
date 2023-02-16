@@ -8,7 +8,7 @@ from offline_training.batched_world_model.modules import BatchedEncoder, Batched
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 class BatchedWorldModel(nn.Module):
-    def __init__(self, key_type, key_dim, val_type, val_dim, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, key_type, key_dim, key_temp, val_type, val_dim, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
         self.latent_size = latent_size 
@@ -23,7 +23,7 @@ class BatchedWorldModel(nn.Module):
 
         elif key_type == "emma":
             self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
-            self.attn_scale = np.sqrt(key_dim)
+            self.attn_scale = key_temp*np.sqrt(key_dim)
             self.txt_key = nn.Linear(768, key_dim).to(device)
             self.scale_key = nn.Sequential(
                 nn.Linear(768, 1),
