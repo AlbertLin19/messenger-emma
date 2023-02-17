@@ -107,18 +107,20 @@ class Analyzer:
             precisions = self.tps / (self.tps + self.fps)
             f1s = (2 * recalls * precisions) / (recalls + precisions)
 
-            # log recall, precision, f1 versus timestep
+            # log recall, precision, f1 for each timestep and their averages across timesteps
             def logCurves(log_suffix, idxs):
-                timestep = np.arange(self.max_rollout_length)
-                recall = recalls[:, idxs].mean(dim=-1).cpu().numpy()
-                precision = precisions[:, idxs].mean(dim=-1).cpu().numpy()
-                f1 = f1s[:, idxs].mean(dim=-1).cpu().numpy()
+                recall = recalls[:, idxs].nanmean(dim=-1)
+                precision = precisions[:, idxs].nanmean(dim=-1)
+                f1 = f1s[:, idxs].nanmean(dim=-1)
                         
                 log.update({
-                    f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
-                    f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
-                    f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
+                    f'recall_{log_suffix}': recall.nanmean(),
+                    f'precision_{log_suffix}': precision.nanmean(),
+                    f'f1_{log_suffix}': f1.nanmean(),
                 })
+                log.update({f'recall_{log_suffix}_{i}': recall[i] for i in range(self.max_rollout_length)})
+                log.update({f'precision_{log_suffix}_{i}': precision[i] for i in range(self.max_rollout_length)})
+                log.update({f'f1_{log_suffix}_{i}': f1[i] for i in range(self.max_rollout_length)})
 
             for idx in self.relevant_cls_idxs:
                 logCurves(idx, [idx])
