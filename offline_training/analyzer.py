@@ -1,8 +1,8 @@
 import torch
 import torch.nn.functional as F
+import numpy as np
 import wandb
 
-from matplotlib import pyplot as plt
 from offline_training.batched_world_model.utils import batched_ground, ENTITY_IDS
 
 COLORS = torch.tensor([
@@ -66,19 +66,19 @@ class Analyzer:
             self.fps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == float('inf'), dim=(1, 2))[cur_idxs])
 
             # store single frame from first trajectory in batch (if ongoing) for each of the videos
-            ongoing = (cur_idxs == 0).any()
-            self.pred_probs_for_vid.append(pred_probs[0].cpu()*(1 if ongoing else 0))
-            if len(self.pred_probs_for_vid) > self.n_frames:
-                self.pred_probs_for_vid.pop(0)
-            self.pred_multilabels_for_vid.append(pred_multilabels[0].cpu()*(1 if ongoing else 0))
-            if len(self.pred_multilabels_for_vid) > self.n_frames:
-                self.pred_multilabels_for_vid.pop(0)
-            self.true_probs_for_vid.append(true_probs[0].cpu()*(1 if ongoing else 0))
-            if len(self.true_probs_for_vid) > self.n_frames:
-                self.true_probs_for_vid.pop(0)
-            self.true_multilabels_for_vid.append(true_multilabels[0].cpu()*(1 if ongoing else 0))
-            if len(self.true_multilabels_for_vid) > self.n_frames:
-                self.true_multilabels_for_vid.pop(0)
+            if (cur_idxs == 0).any():
+                self.pred_probs_for_vid.append(pred_probs[0].cpu())
+                if len(self.pred_probs_for_vid) > self.n_frames:
+                    self.pred_probs_for_vid.pop(0)
+                self.pred_multilabels_for_vid.append(pred_multilabels[0].cpu())
+                if len(self.pred_multilabels_for_vid) > self.n_frames:
+                    self.pred_multilabels_for_vid.pop(0)
+                self.true_probs_for_vid.append(true_probs[0].cpu())
+                if len(self.true_probs_for_vid) > self.n_frames:
+                    self.true_probs_for_vid.pop(0)
+                self.true_multilabels_for_vid.append(true_multilabels[0].cpu())
+                if len(self.true_multilabels_for_vid) > self.n_frames:
+                    self.true_multilabels_for_vid.pop(0)
 
             # accumulate manuals and ground_truths
             missing = None in self.manual.values()
@@ -101,72 +101,69 @@ class Analyzer:
     def getLog(self, step):
         log = {}
 
-        # calculate recalls, precisions, f1s
-        recalls = self.tps / (self.tps + self.fns)
-        precisions = self.tps / (self.tps + self.fps)
-        f1s = (2 * recalls * precisions) / (recalls + precisions)
+        with torch.no_grad():
+            # calculate recalls, precisions, f1s
+            recalls = self.tps / (self.tps + self.fns)
+            precisions = self.tps / (self.tps + self.fps)
+            f1s = (2 * recalls * precisions) / (recalls + precisions)
 
-        # log recall, precision, f1 versus timesteps
-        def logCurves(log_suffix, idxs):
-            recall_fig, recall_ax = plt.subplots()
-            recall_ax.plot(np.arange(self.max_rollout_length), recalls[:, idxs].mean(dim=-1).cpu().numpy())
+            # log recall, precision, f1 versus timestep
+            def logCurves(log_suffix, idxs):
+                timestep = np.arange(self.max_rollout_length)
+                recall = recalls[:, idxs].mean(dim=-1).cpu().numpy()
+                precision = precisions[:, idxs].mean(dim=-1).cpu().numpy()
+                f1 = f1s[:, idxs].mean(dim=-1).cpu().numpy()
+                        
+                log.update({
+                    f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
+                    f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
+                    f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
+                })
 
-            precision_fig, precision_ax = plt.subplots()
-            precision_ax.plot(np.arange(self.max_rollout_length), precisions[:, idxs].mean(dim=-1).cpu().numpy())
+            for idx in self.relevant_cls_idxs:
+                logCurves(idx, [idx])
+            logCurves('sprite', self.sprite_idxs)
+            logCurves('entity', self.entity_idxs)
+            logCurves('avatar', [15, 16])
 
-            f1_fig, f1_ax = plt.subplots()
-            f1_ax.plot(np.arange(self.max_rollout_length), f1s[:, idxs].mean(dim=-1).cpu().numpy())
+            # log visualizations of predictions
             
-            log.update({
-                f'recall_{log_suffix}': recall_fig,
-                f'precision_{log_suffix}': precision_fig,
-                f'f1_{log_suffix}': f1_fig,
-            })
+            true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
+            probs = torch.cat((true_probs, pred_probs), dim=2)
+            log.update({f'prob_{i}': wandb.Video((255*probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
+            log.update({'probs': wandb.Video(torch.sum((probs.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
 
-        for idx in self.relevant_cls_idxs:
-            logCurves(idx, [idx])
-        logCurves('sprite', self.sprite_idxs)
-        logCurves('entity', self.entity_idxs)
-        logCurves('avatar', [15, 16])
+            true_multilabels = F.pad(torch.stack(self.true_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
+            pred_multilabels = F.pad(torch.stack(self.pred_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
+            multilabels = torch.cat((true_multilabels, pred_multilabels), dim=2)
+            log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
+            log.update({'multilabels': wandb.Video(torch.min(torch.sum((multilabels.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
-        # log visualizations of predictions
-        
-        true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
-        pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
-        probs = torch.cat((true_probs, pred_probs), dim=2)
-        log.update({f'prob_{i}': wandb.Video((255*probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
-        log.update({'probs': wandb.Video(torch.sum((probs.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+            # log grounding and token attention table
+            if not (None in self.manual.values()):
+                idxs = torch.sort(self.entity_idxs).values
+                manual = torch.stack([self.manual[idx.item()] for idx in idxs], dim=0)
+                ground_truth = [self.ground_truth[idx.item()] for idx in idxs]
+                token = [self.token[idx.item()] for idx in idxs]
 
-        true_multilabels = F.pad(torch.stack(self.true_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
-        pred_multilabels = F.pad(torch.stack(self.pred_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
-        multilabels = torch.cat((true_multilabels, pred_multilabels), dim=2)
-        log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
-        log.update({'multilabels': wandb.Video(torch.min(torch.sum((multilabels.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
+                grounding = batched_ground(manual.unsqueeze(0), [ground_truth], self.world_model)[0, idxs].cpu()
+                log.update({'grounding': wandb.Image(grounding.unsqueeze(0))})
 
-        # log grounding and token attention table
-        if not (None in self.manual.values()):
-            idxs = torch.sort(self.entity_idxs).values
-            manual = torch.stack([self.manual[idx] for idx in idxs], dim=0)
-            ground_truth = [self.ground_truth[idx] for idx in idxs]
-            token = [self.token[idx] for idx in idxs]
-
-            grounding = batched_ground([manual], [ground_truth], world_model)[0, idxs].cpu()
-            log.update({'grounding': wandb.Image(grounding.unsqueeze(0))})
-
-            if ('emma' in world_model.key_type) or ('emma' in world_model.val_type):
-                token = np.array(token)
-                columns = [step*np.ones(token.size), token.flatten()]
-                column_names = ['step', 'token']
-                if 'emma' in world_model.key_type:
-                    key_attention = world_model.scale_key(manual).squeeze(-1).cpu()
-                    columns.append(key_attention.numpy().flatten())
-                    column_names.append('key')
-                if 'emma' in world_model.val_type:
-                    value_attention = world_model.scale_val(manual).squeeze(-1).cpu()
-                    columns.append(value_attention.numpy().flatten())
-                    column_names.append('value')
-                log.update({'token_attention': wandb.Table(columns=column_names, data=np.stack(columns, axis=-1))})
-                    
+                if ('emma' in self.world_model.key_type) or ('emma' in self.world_model.val_type):
+                    token = np.asarray(token)
+                    columns = [step*np.ones(token.size), token.flatten()]
+                    column_names = ['step', 'token']
+                    if 'emma' in self.world_model.key_type:
+                        key_attention = self.world_model.scale_key(manual).squeeze(-1).cpu()
+                        columns.append(key_attention.numpy().flatten())
+                        column_names.append('key')
+                    if 'emma' in self.world_model.val_type:
+                        value_attention = self.world_model.scale_val(manual).squeeze(-1).cpu()
+                        columns.append(value_attention.numpy().flatten())
+                        column_names.append('value')
+                    log.update({'token_attention': wandb.Table(columns=column_names, data=np.stack(columns, axis=-1))})
+                        
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)
         return log
