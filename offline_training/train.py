@@ -110,6 +110,7 @@ def train(args):
         grids, actions, manuals, ground_truths, (new_idxs, cur_idxs), timesteps = train_all_dataloader.step()
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
+        tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
         manuals, tokens = encoder.encode(manuals)
     
         # accumulate gradient
@@ -151,8 +152,8 @@ def train(args):
 
         # push results to analyzers and run eval
         if step % args.eval_step > (args.eval_step - args.eval_length):
-            train_all_real_analyzer.push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), timesteps, step)
-            train_all_imag_analyzer.push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), timesteps, step)
+            train_all_real_analyzer.push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), tensor_timesteps)
+            train_all_imag_analyzer.push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), tensor_timesteps)
 
             # run eval
             with torch.no_grad():
@@ -160,6 +161,7 @@ def train(args):
                 val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps = val_same_worlds_dataloader.step()
                 val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
                 val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
+                val_tensor_timesteps = torch.from_numpy(val_timesteps).long().to(args.device)
                 val_manuals, val_tokens = encoder.encode(val_manuals)
             
                 val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
@@ -169,8 +171,8 @@ def train(args):
                 eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
                 eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
 
-            val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps, step)
-            val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps, step)
+            val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_tensor_timesteps)
+            val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_tensor_timesteps)
 
         # log results
         if step % args.eval_step == 0:
@@ -181,10 +183,10 @@ def train(args):
                 "val_real_loss": val_real_loss,
                 "val_imag_loss": val_imag_loss,
             }
-            eval_log.update(train_all_real_analyzer.getLog())
-            eval_log.update(train_all_imag_analyzer.getLog())
-            eval_log.update(val_same_worlds_real_analyzer.getLog())
-            eval_log.update(val_same_worlds_imag_analyzer.getLog())
+            eval_log.update(train_all_real_analyzer.getLog(step))
+            eval_log.update(train_all_imag_analyzer.getLog(step))
+            eval_log.update(val_same_worlds_real_analyzer.getLog(step))
+            eval_log.update(val_same_worlds_imag_analyzer.getLog(step))
             wandb.log(eval_log)
 
             train_all_real_analyzer.reset()
@@ -250,6 +252,7 @@ if __name__ == "__main__":
     if args.world_model_val_type == "oracle":
         args.world_model_val_dim = 4 # 3 entity mvmt types + avatar mvmt type
 
+    assert args.eval_step >= args.eval_length
     assert args.eval_length >= args.n_frames
     
     # get hash of arguments minus seed

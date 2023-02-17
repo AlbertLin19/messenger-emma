@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import wandb
 
 from matplotlib import pyplot as plt
-from offline_training.utils import batched_ground, ENTITY_IDS
+from offline_training.batched_world_model.utils import batched_ground, ENTITY_IDS
 
 COLORS = torch.tensor([
         [0, 0, 0], # 0 background
@@ -37,6 +37,8 @@ class Analyzer:
         self.sprite_idxs = self.relevant_cls_idxs[((self.relevant_cls_idxs != 0)*(self.relevant_cls_idxs != 1)*(self.relevant_cls_idxs != 14)).argwhere().squeeze(-1)]
         self.entity_idxs = self.sprite_idxs[((self.sprite_idxs != 15)*(self.sprite_idxs != 16)).argwhere().squeeze(-1)]
 
+        self.reset()
+
     def reset(self):
         self.tps = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
         self.fns = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
@@ -47,10 +49,11 @@ class Analyzer:
         self.true_probs_for_vid = []
         self.true_multilabels_for_vid = []
 
-        self.manuals = {name: None for name in ENTITY_IDS.keys()}
-        self.ground_truths = {name: None for name in ENTITY_IDS.keys()}
+        self.manual = {idx.item(): None for idx in self.entity_idxs}
+        self.ground_truth = {idx.item(): None for idx in self.entity_idxs}
+        self.token = {idx.item(): None for idx in self.entity_idxs}
 
-    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps, step):
+    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
         manuals, tokens = descriptors_tuple
         new_idxs, cur_idxs = idxs_tuple
@@ -78,23 +81,24 @@ class Analyzer:
                 self.true_multilabels_for_vid.pop(0)
 
             # accumulate manuals and ground_truths
-            missing = None in self.manuals.values()
+            missing = None in self.manual.values()
             for i in range(len(manuals)):
                 if not missing:
                     break
 
                 for j in range(len(manuals[i])):
-                    name = ground_truths[i][j][0]
+                    idx = ENTITY_IDS[ground_truths[i][j][0]]
 
-                    if self.manuals[name] is None:
-                        self.manuals[name] = manuals[i][j]
-                        self.ground_truths[name] = ground_truths[i][j]
+                    if self.manual[idx] is None:
+                        self.manual[idx] = manuals[i][j]
+                        self.ground_truth[idx] = ground_truths[i][j]
+                        self.token[idx] = tokens[i][j]
 
-                        missing = None in self.manuals.values()
+                        missing = None in self.manual.values()
                         if not missing:
                             break
 
-    def getLog(self):
+    def getLog(self, step):
         log = {}
 
         # calculate recalls, precisions, f1s
@@ -124,6 +128,8 @@ class Analyzer:
         logCurves('sprite', self.sprite_idxs)
         logCurves('entity', self.entity_idxs)
         logCurves('avatar', [15, 16])
+
+        # log visualizations of predictions
         
         true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
@@ -137,6 +143,30 @@ class Analyzer:
         log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
         log.update({'multilabels': wandb.Video(torch.min(torch.sum((multilabels.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
+        # log grounding and token attention table
+        if not (None in self.manual.values()):
+            idxs = torch.sort(self.entity_idxs).values
+            manual = torch.stack([self.manual[idx] for idx in idxs], dim=0)
+            ground_truth = [self.ground_truth[idx] for idx in idxs]
+            token = [self.token[idx] for idx in idxs]
+
+            grounding = batched_ground([manual], [ground_truth], world_model)[0, idxs].cpu()
+            log.update({'grounding': wandb.Image(grounding.unsqueeze(0))})
+
+            if ('emma' in world_model.key_type) or ('emma' in world_model.val_type):
+                token = np.array(token)
+                columns = [step*np.ones(token.size), token.flatten()]
+                column_names = ['step', 'token']
+                if 'emma' in world_model.key_type:
+                    key_attention = world_model.scale_key(manual).squeeze(-1).cpu()
+                    columns.append(key_attention.numpy().flatten())
+                    column_names.append('key')
+                if 'emma' in world_model.val_type:
+                    value_attention = world_model.scale_val(manual).squeeze(-1).cpu()
+                    columns.append(value_attention.numpy().flatten())
+                    column_names.append('value')
+                log.update({'token_attention': wandb.Table(columns=column_names, data=np.stack(columns, axis=-1))})
+                    
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)
         return log
