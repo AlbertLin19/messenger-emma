@@ -2,7 +2,8 @@ import torch
 import torch.nn.functional as F
 import wandb
 
-from offline_training.utils import batched_ground
+from matplotlib import pyplot as plt
+from offline_training.utils import batched_ground, ENTITY_IDS
 
 COLORS = torch.tensor([
         [0, 0, 0], # 0 background
@@ -25,26 +26,29 @@ COLORS = torch.tensor([
     ])
 
 class Analyzer:
-    def __init__(self, world_model, log_prefix, max_rollout_length, relevant_cls_idxs, n_frames, n_tokens):
+    def __init__(self, world_model, log_prefix, max_rollout_length, relevant_cls_idxs, n_frames, device):
         self.world_model = world_model
         self.log_prefix = log_prefix
         self.max_rollout_length = max_rollout_length
         self.relevant_cls_idxs = relevant_cls_idxs.cpu()
         self.n_frames = n_frames
-        self.n_tokens = n_tokens
+        self.device = device
+
+        self.sprite_idxs = self.relevant_cls_idxs[((self.relevant_cls_idxs != 0)*(self.relevant_cls_idxs != 1)*(self.relevant_cls_idxs != 14)).argwhere().squeeze(-1)]
+        self.entity_idxs = self.sprite_idxs[((self.sprite_idxs != 15)*(self.sprite_idxs != 16)).argwhere().squeeze(-1)]
 
     def reset(self):
+        self.tps = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.fns = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.fps = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+
         self.pred_probs_for_vid = []
         self.pred_multilabels_for_vid = []
         self.true_probs_for_vid = []
         self.true_multilabels_for_vid = []
 
-        self.tps = []
-        self.fns = []
-        self.fps = []
-
-        self.groundings = []
-        self.tokens = []
+        self.manuals = {name: None for name in ENTITY_IDS.keys()}
+        self.ground_truths = {name: None for name in ENTITY_IDS.keys()}
 
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps, step):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
@@ -52,17 +56,11 @@ class Analyzer:
         new_idxs, cur_idxs = idxs_tuple
 
         with torch.no_grad():
-            # calculate confusions for ongoing trajectories
-            confusions = pred_multilabels[cur_idxs] / true_multilabels[cur_idxs] # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
-            self.tps.append(torch.sum(confusions == 1, dim=(0, 1, 2)))            
-            if len(self.tps) > self.eval_length:
-                self.tps.pop(0)
-            self.fns.append(torch.sum(confusions == 0, dim=(0, 1, 2)))
-            if len(self.fns) > self.eval_length:
-                self.fns.pop(0)
-            self.fps.append(torch.sum(confusions == float('inf'), dim=(0, 1, 2)))
-            if len(self.fps) > self.eval_length:
-                self.fps.pop(0)
+            # increment tps, fns, and fps for ongoing trajectories
+            confusions = pred_multilabels / true_multilabels # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            self.tps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == 1, dim=(1, 2))[cur_idxs])
+            self.fns.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == 0, dim=(1, 2))[cur_idxs])
+            self.fps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == float('inf'), dim=(1, 2))[cur_idxs])
 
             # store single frame from first trajectory in batch (if ongoing) for each of the videos
             ongoing = (cur_idxs == 0).any()
@@ -79,38 +77,53 @@ class Analyzer:
             if len(self.true_multilabels_for_vid) > self.n_frames:
                 self.true_multilabels_for_vid.pop(0)
 
-            # calculate groundings for new manuals
-            if len(new_idxs) > 0:
-                self.groundings.extend(batched_ground(manuals[new_idxs], ground_truths[new_idxs], self.world_model))
+            # accumulate manuals and ground_truths
+            missing = None in self.manuals.values()
+            for i in range(len(manuals)):
+                if not missing:
+                    break
 
-            
+                for j in range(len(manuals[i])):
+                    name = ground_truths[i][j][0]
+
+                    if self.manuals[name] is None:
+                        self.manuals[name] = manuals[i][j]
+                        self.ground_truths[name] = ground_truths[i][j]
+
+                        missing = None in self.manuals.values()
+                        if not missing:
+                            break
 
     def getLog(self):
         log = {}
 
-        # calculate recall, precision, f1
-        tp = torch.stack(self.tps, dim=0).sum(dim=0)
-        fn = torch.stack(self.fns, dim=0).sum(dim=0)
-        fp = torch.stack(self.fps, dim=0).sum(dim=0)
-        recall = tp / (tp + fn)
-        precision = tp / (tp + fp)
-        f1 = (2 * recall * precision) / (recall + precision)
-        sprite_idxs = self.relevant_cls_idxs[((self.relevant_cls_idxs != 0)*(self.relevant_cls_idxs != 1)*(self.relevant_cls_idxs != 14)).argwhere().squeeze(-1)]
-        entity_idxs = sprite_idxs[((sprite_idxs != 15)*(sprite_idxs != 16)).argwhere().squeeze(-1)]
-        log.update({
-            'recall_sprite': recall[sprite_idxs].nanmean(),
-            'precision_sprite': precision[sprite_idxs].nanmean(),
-            'f1_sprite': f1[sprite_idxs].nanmean(),
-            'recall_entity': recall[entity_idxs].nanmean(),
-            'precision_entity': precision[entity_idxs].nanmean(),
-            'f1_entity': f1[entity_idxs].nanmean(),
-            'recall_avatar': recall[15:17].nanmean(),
-            'precision_avatar': precision[15:17].nanmean(),
-            'f1_avatar': f1[15:17].nanmean(),
-        })
-        log.update({f'recall_{i}': recall[i] for i in self.relevant_cls_idxs})
-        log.update({f'precision_{i}': precision[i] for i in self.relevant_cls_idxs})
-        log.update({f'f1_{i}': f1[i] for i in self.relevant_cls_idxs})
+        # calculate recalls, precisions, f1s
+        recalls = self.tps / (self.tps + self.fns)
+        precisions = self.tps / (self.tps + self.fps)
+        f1s = (2 * recalls * precisions) / (recalls + precisions)
+
+        # log recall, precision, f1 versus timesteps
+        def logCurves(log_suffix, idxs):
+            recall_fig, recall_ax = plt.subplots()
+            recall_ax.plot(np.arange(self.max_rollout_length), recalls[:, idxs].mean(dim=-1).cpu().numpy())
+
+            precision_fig, precision_ax = plt.subplots()
+            precision_ax.plot(np.arange(self.max_rollout_length), precisions[:, idxs].mean(dim=-1).cpu().numpy())
+
+            f1_fig, f1_ax = plt.subplots()
+            f1_ax.plot(np.arange(self.max_rollout_length), f1s[:, idxs].mean(dim=-1).cpu().numpy())
+            
+            log.update({
+                f'recall_{log_suffix}': recall_fig,
+                f'precision_{log_suffix}': precision_fig,
+                f'f1_{log_suffix}': f1_fig,
+            })
+
+        for idx in self.relevant_cls_idxs:
+            logCurves(idx, [idx])
+        logCurves('sprite', self.sprite_idxs)
+        logCurves('entity', self.entity_idxs)
+        logCurves('avatar', [15, 16])
         
         true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
         pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))

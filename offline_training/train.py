@@ -61,10 +61,10 @@ def train(args):
     eval_world_model.load_state_dict(world_model.state_dict())
 
     # Analyzers
-    train_all_real_analyzer = Analyzer(world_model, "real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
-    train_all_imag_analyzer = Analyzer(world_model, "imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
-    val_same_worlds_real_analyzer = Analyzer(eval_world_model, "val_real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
-    val_same_worlds_imag_analyzer = Analyzer(eval_world_model, "val_imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
+    train_all_real_analyzer = Analyzer(world_model, "real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
+    train_all_imag_analyzer = Analyzer(world_model, "imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
+    val_same_worlds_real_analyzer = Analyzer(eval_world_model, "val_real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
+    val_same_worlds_imag_analyzer = Analyzer(eval_world_model, "val_imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
 
     # Text Encoder
     encoder_model = AutoModel.from_pretrained("bert-base-uncased")
@@ -240,7 +240,6 @@ if __name__ == "__main__":
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
     parser.add_argument('--eval_length', default=128, type=int, help='number of steps to run evaluation')
     parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
-    parser.add_argument('--n_tokens', default=432, type=int, help='number of tokens to log in attention table')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
 
     args = parser.parse_args()
