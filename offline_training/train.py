@@ -61,10 +61,10 @@ def train(args):
     eval_world_model.load_state_dict(world_model.state_dict())
 
     # Analyzers
-    train_all_real_analyzer = Analyzer("real_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
-    train_all_imag_analyzer = Analyzer("imag_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
-    val_same_worlds_real_analyzer = Analyzer("val_real_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
-    val_same_worlds_imag_analyzer = Analyzer("val_imag_", args.eval_length, args.vis_length, world_model.relevant_cls_idxs)
+    train_all_real_analyzer = Analyzer(world_model, "real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
+    train_all_imag_analyzer = Analyzer(world_model, "imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
+    val_same_worlds_real_analyzer = Analyzer(eval_world_model, "val_real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
+    val_same_worlds_imag_analyzer = Analyzer(eval_world_model, "val_imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.n_tokens)
 
     # Text Encoder
     encoder_model = AutoModel.from_pretrained("bert-base-uncased")
@@ -86,14 +86,14 @@ def train(args):
     grids, actions, manuals, ground_truths = train_all_dataloader.reset()
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
     tensor_actions = torch.from_numpy(actions).long().to(args.device)
-    manuals, _ = encoder.encode(manuals)
+    manuals, tokens = encoder.encode(manuals)
     world_model.real_state_reset(tensor_grids)
     world_model.imag_state_reset(tensor_grids)
 
     val_grids, val_actions, val_manuals, val_ground_truths = val_same_worlds_dataloader.reset()
     val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
     val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-    val_manuals, _ = encoder.encode(val_manuals)
+    val_manuals, val_tokens = encoder.encode(val_manuals)
     eval_world_model.real_state_reset(val_tensor_grids)
     eval_world_model.imag_state_reset(val_tensor_grids)
 
@@ -107,10 +107,10 @@ def train(args):
             args.world_model_val_freeze = False
 
         old_tensor_grids = tensor_grids
-        grids, actions, manuals, ground_truths, (new_idxs, cur_idxs) = train_all_dataloader.step()
+        grids, actions, manuals, ground_truths, (new_idxs, cur_idxs), timesteps = train_all_dataloader.step()
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
-        manuals, _ = encoder.encode(manuals)
+        manuals, tokens = encoder.encode(manuals)
     
         # accumulate gradient
         if args.world_model_loss_source == "real":
@@ -151,16 +151,16 @@ def train(args):
 
         # push results to analyzers and run eval
         if step % args.eval_step > (args.eval_step - args.eval_length):
-            train_all_real_analyzer.push(*real_results)
-            train_all_imag_analyzer.push(*imag_results)
+            train_all_real_analyzer.push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), timesteps, step)
+            train_all_imag_analyzer.push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), timesteps, step)
 
             # run eval
             with torch.no_grad():
                 val_old_tensor_grids = val_tensor_grids
-                val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs) = val_same_worlds_dataloader.step()
+                val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps = val_same_worlds_dataloader.step()
                 val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
                 val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-                val_manuals, _ = encoder.encode(val_manuals)
+                val_manuals, val_tokens = encoder.encode(val_manuals)
             
                 val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
                 val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
@@ -169,8 +169,8 @@ def train(args):
                 eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
                 eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
 
-            val_same_worlds_real_analyzer.push(*val_real_results)
-            val_same_worlds_imag_analyzer.push(*val_imag_results)
+            val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps, step)
+            val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps, step)
 
         # log results
         if step % args.eval_step == 0:
@@ -186,6 +186,11 @@ def train(args):
             eval_log.update(val_same_worlds_real_analyzer.getLog())
             eval_log.update(val_same_worlds_imag_analyzer.getLog())
             wandb.log(eval_log)
+
+            train_all_real_analyzer.reset()
+            train_all_imag_analyzer.reset()
+            val_same_worlds_real_analyzer.reset()
+            val_same_worlds_imag_analyzer.reset()
 
         pbar.update(1)
         # check if max_time has elapsed
@@ -233,8 +238,9 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
-    parser.add_argument('--eval_length', default=32, type=int, help='number of steps to run evaluation')
-    parser.add_argument('--vis_length', default=32, type=int, help='number of steps to visualize')
+    parser.add_argument('--eval_length', default=128, type=int, help='number of steps to run evaluation')
+    parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
+    parser.add_argument('--n_tokens', default=432, type=int, help='number of tokens to log in attention table')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
 
     args = parser.parse_args()
@@ -245,7 +251,7 @@ if __name__ == "__main__":
     if args.world_model_val_type == "oracle":
         args.world_model_val_dim = 4 # 3 entity mvmt types + avatar mvmt type
 
-    assert args.eval_length >= args.vis_length
+    assert args.eval_length >= args.n_frames
     
     # get hash of arguments minus seed
     args_dict = vars(args).copy()

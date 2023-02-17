@@ -2,11 +2,6 @@ import torch
 import torch.nn.functional as F
 
 from messenger.envs.config import NPCS
-
-ENTITY_NAMES = {entity.id: entity.name for entity in NPCS}
-def get_NPCS():
-    return ENTITY_NAMES.copy()
-
 ENTITY_IDS = {entity.name: entity.id for entity in NPCS}
 MOVEMENT_TYPES = {
     "chaser": 0,

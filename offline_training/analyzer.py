@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 import wandb
 
+from offline_training.utils import batched_ground
+
 COLORS = torch.tensor([
         [0, 0, 0], # 0 background
         [255, 0, 0], # 1 dirt
@@ -22,15 +24,16 @@ COLORS = torch.tensor([
         [255, 0, 255], # 16 with_message
     ])
 
-    
-
 class Analyzer:
-    def __init__(self, log_prefix, eval_length, vis_length, relevant_cls_idxs):
+    def __init__(self, world_model, log_prefix, max_rollout_length, relevant_cls_idxs, n_frames, n_tokens):
+        self.world_model = world_model
         self.log_prefix = log_prefix
-        self.eval_length = eval_length
-        self.vis_length = vis_length
+        self.max_rollout_length = max_rollout_length
         self.relevant_cls_idxs = relevant_cls_idxs.cpu()
+        self.n_frames = n_frames
+        self.n_tokens = n_tokens
 
+    def reset(self):
         self.pred_probs_for_vid = []
         self.pred_multilabels_for_vid = []
         self.true_probs_for_vid = []
@@ -40,11 +43,17 @@ class Analyzer:
         self.fns = []
         self.fps = []
 
-    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels):
+        self.groundings = []
+        self.tokens = []
+
+    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps, step):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
+        manuals, tokens = descriptors_tuple
+        new_idxs, cur_idxs = idxs_tuple
+
         with torch.no_grad():
-            # calculate confusions
-            confusions = pred_multilabels / true_multilabels # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            # calculate confusions for ongoing trajectories
+            confusions = pred_multilabels[cur_idxs] / true_multilabels[cur_idxs] # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
             self.tps.append(torch.sum(confusions == 1, dim=(0, 1, 2)))            
             if len(self.tps) > self.eval_length:
                 self.tps.pop(0)
@@ -55,19 +64,26 @@ class Analyzer:
             if len(self.fps) > self.eval_length:
                 self.fps.pop(0)
 
-            # store single frame for each videos
-            self.pred_probs_for_vid.append(pred_probs[0].cpu())
-            if len(self.pred_probs_for_vid) > self.vis_length:
+            # store single frame from first trajectory in batch (if ongoing) for each of the videos
+            ongoing = (cur_idxs == 0).any()
+            self.pred_probs_for_vid.append(pred_probs[0].cpu()*(1 if ongoing else 0))
+            if len(self.pred_probs_for_vid) > self.n_frames:
                 self.pred_probs_for_vid.pop(0)
-            self.pred_multilabels_for_vid.append(pred_multilabels[0].cpu())
-            if len(self.pred_multilabels_for_vid) > self.vis_length:
+            self.pred_multilabels_for_vid.append(pred_multilabels[0].cpu()*(1 if ongoing else 0))
+            if len(self.pred_multilabels_for_vid) > self.n_frames:
                 self.pred_multilabels_for_vid.pop(0)
-            self.true_probs_for_vid.append(true_probs[0].cpu())
-            if len(self.true_probs_for_vid) > self.vis_length:
+            self.true_probs_for_vid.append(true_probs[0].cpu()*(1 if ongoing else 0))
+            if len(self.true_probs_for_vid) > self.n_frames:
                 self.true_probs_for_vid.pop(0)
-            self.true_multilabels_for_vid.append(true_multilabels[0].cpu())
-            if len(self.true_multilabels_for_vid) > self.vis_length:
+            self.true_multilabels_for_vid.append(true_multilabels[0].cpu()*(1 if ongoing else 0))
+            if len(self.true_multilabels_for_vid) > self.n_frames:
                 self.true_multilabels_for_vid.pop(0)
+
+            # calculate groundings for new manuals
+            if len(new_idxs) > 0:
+                self.groundings.extend(batched_ground(manuals[new_idxs], ground_truths[new_idxs], self.world_model))
+
+            
 
     def getLog(self):
         log = {}
