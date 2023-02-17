@@ -53,6 +53,8 @@ class Analyzer:
         self.ground_truth = {idx.item(): None for idx in self.entity_idxs}
         self.token = {idx.item(): None for idx in self.entity_idxs}
 
+        self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
+
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
         manuals, tokens = descriptors_tuple
@@ -95,6 +97,22 @@ class Analyzer:
                         self.token[idx] = tokens[i][j]
 
                         missing = None in self.manual.values()
+                        if not missing:
+                            break
+
+            # accumulate game_grounding as an alternative to the full-sample grounding
+            missing = (self.game_grounding.sum(dim=-1) == 0).any()
+            for i in range(len(manuals)):
+                if not missing:
+                    break
+
+                for j in range(len(manuals[i])):
+                    idx = ENTITY_IDS[ground_truths[i][j][0]]
+
+                    if self.game_grounding[idx].sum() == 0:
+                        self.game_grounding[idx, [ground_truths[i][k][0] for k in range(len(manuals[i]))]] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, idx]
+
+                        missing = (self.game_grounding.sum(dim=-1) == 0).any()
                         if not missing:
                             break
 
@@ -165,6 +183,10 @@ class Analyzer:
                         columns.append(value_attention.numpy().flatten())
                         column_names.append('value')
                     log.update({'token_attention': wandb.Table(columns=column_names, data=np.stack(columns, axis=-1))})
+
+            # log game_grounding as an alternative
+            if not (self.game_grounding.sum(dim=-1) == 0).any():
+                log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
                         
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)
