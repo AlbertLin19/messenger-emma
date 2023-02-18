@@ -36,6 +36,7 @@ class Analyzer:
 
         self.sprite_idxs = self.relevant_cls_idxs[((self.relevant_cls_idxs != 0)*(self.relevant_cls_idxs != 1)*(self.relevant_cls_idxs != 14)).argwhere().squeeze(-1)]
         self.entity_idxs = self.sprite_idxs[((self.sprite_idxs != 15)*(self.sprite_idxs != 16)).argwhere().squeeze(-1)]
+        self.sorted_entity_idxs = torch.sort(self.entity_idxs).values
 
         self.reset()
 
@@ -107,10 +108,10 @@ class Analyzer:
                     break
 
                 for j in range(len(manuals[i])):
-                    idx = ENTITY_IDS[ground_truths[i][j][0]]
+                    idx = (self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][j][0]]).argwhere().squeeze()
 
                     if self.game_grounding[idx].sum() == 0:
-                        self.game_grounding[idx, [ENTITY_IDS[ground_truths[i][k][0]] for k in range(len(manuals[i]))]] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, idx]
+                        self.game_grounding[idx, [(self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][k][0]]).argwhere().squeeze() for k in range(len(manuals[i]))]] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, idx]
 
                         missing = (self.game_grounding.sum(dim=-1) == 0).any()
                         if not missing:
@@ -166,12 +167,11 @@ class Analyzer:
 
             # log grounding and token attention table
             if not (None in self.manual.values()):
-                idxs = torch.sort(self.entity_idxs).values
-                manual = torch.stack([self.manual[idx.item()] for idx in idxs], dim=0)
-                ground_truth = [self.ground_truth[idx.item()] for idx in idxs]
-                token = [self.token[idx.item()] for idx in idxs]
+                manual = torch.stack([self.manual[idx.item()] for idx in self.sorted_entity_idxs], dim=0)
+                ground_truth = [self.ground_truth[idx.item()] for idx in self.sorted_entity_idxs]
+                token = [self.token[idx.item()] for idx in self.sorted_entity_idxs]
 
-                grounding = batched_ground(manual.unsqueeze(0), [ground_truth], self.world_model)[0, idxs].cpu()
+                grounding = batched_ground(manual.unsqueeze(0), [ground_truth], self.world_model)[0, self.sorted_entity_idxs].cpu()
                 log.update({'grounding': wandb.Image(grounding.unsqueeze(0))})
 
                 if ('emma' in self.world_model.key_type) or ('emma' in self.world_model.val_type):
