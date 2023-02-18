@@ -110,7 +110,7 @@ class Analyzer:
                     idx = ENTITY_IDS[ground_truths[i][j][0]]
 
                     if self.game_grounding[idx].sum() == 0:
-                        self.game_grounding[idx, [ground_truths[i][k][0] for k in range(len(manuals[i]))]] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, idx]
+                        self.game_grounding[idx, [ENTITY_IDS[ground_truths[i][k][0]] for k in range(len(manuals[i]))]] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, idx]
 
                         missing = (self.game_grounding.sum(dim=-1) == 0).any()
                         if not missing:
@@ -131,10 +131,14 @@ class Analyzer:
                 precision = precisions[:, idxs].nanmean(dim=-1)
                 f1 = f1s[:, idxs].nanmean(dim=-1)
                         
+                timestep = np.arange(self.max_rollout_length)
                 log.update({
-                    f'recall_{log_suffix}': recall.nanmean(),
-                    f'precision_{log_suffix}': precision.nanmean(),
-                    f'f1_{log_suffix}': f1.nanmean(),
+                    f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall.cpu().numpy()), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
+                    f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision.cpu().numpy()), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
+                    f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1.cpu().numpy()), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
+                    f'recall_{log_suffix}_avg': recall.nanmean(),
+                    f'precision_{log_suffix}_avg': precision.nanmean(),
+                    f'f1_{log_suffix}_avg': f1.nanmean(),
                 })
                 log.update({f'recall_{log_suffix}_{i}': recall[i] for i in range(self.max_rollout_length)})
                 log.update({f'precision_{log_suffix}_{i}': precision[i] for i in range(self.max_rollout_length)})
