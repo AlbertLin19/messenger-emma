@@ -42,7 +42,8 @@ def batched_ground(manuals, ground_truths, world_model):
 
 def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world_model):
     if world_model.val_type == "oracle":
-        values = F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=4)
+        # scale one_hot to cancel the subsequent averaging over descriptions
+        values = manuals.shape[1]*F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=4)
     elif "emma" in world_model.val_type:
         values = world_model.txt_val(manuals)                                        # B x n_sent x sent_len x val_dim
         val_scales = world_model.scale_val(manuals)                                  # B x n_sent x sent_len x 1
@@ -52,7 +53,7 @@ def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world
         raise NotImplementedError
 
     weights = batched_ground(manuals, ground_truths, world_model)                    # B x 17 x n_sent
-    entity_values = torch.sum(weights.unsqueeze(-1) * values.unsqueeze(-3), dim=-2) # B x 17 x val_dim
+    entity_values = torch.mean(weights.unsqueeze(-1) * values.unsqueeze(-3), dim=-2) # B x 17 x val_dim
     entity_values[:, 0] = torch.tensor([0], device=world_model.device)
     entity_values[:, 1] = torch.tensor([0], device=world_model.device)
     entity_values[:, 14] = torch.tensor([0], device=world_model.device)
