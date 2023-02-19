@@ -85,7 +85,7 @@ class Analyzer:
 
             # accumulate manuals and ground_truths
             missing = None in self.manual.values()
-            for i in range(len(manuals)):
+            for i in new_idxs:
                 if not missing:
                     break
 
@@ -103,7 +103,7 @@ class Analyzer:
 
             # accumulate game_grounding as an alternative to the full-sample grounding
             missing = (self.game_grounding.sum(dim=-1) == 0).any()
-            for i in range(len(manuals)):
+            for i in new_idxs:
                 if not missing:
                     break
 
@@ -111,7 +111,7 @@ class Analyzer:
                     idx = (self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][j][0]]).argwhere().squeeze()
 
                     if self.game_grounding[idx].sum() == 0:
-                        self.game_grounding[idx, [(self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][k][0]]).argwhere().squeeze() for k in range(len(manuals[i]))]] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, idx]
+                        self.game_grounding[idx, torch.cat([(self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][k][0]]).argwhere().squeeze(0) for k in range(len(manuals[i]))])] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, ENTITY_IDS[ground_truths[i][j][0]]]
 
                         missing = (self.game_grounding.sum(dim=-1) == 0).any()
                         if not missing:
