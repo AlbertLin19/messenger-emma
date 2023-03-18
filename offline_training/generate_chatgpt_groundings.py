@@ -61,29 +61,40 @@ for text_file in TEXT_FILES:
                     for movement_text in movement_texts:
                         text_tuples.append((ENTITY_IDS[entity_type], MOVEMENT_TYPES[movement_type], movement_text))
     
-    chatgpt_grounding = {}
+    chatgpt_grounding_path = os.path.join(TEXT_DIR, "chatgpt_grounding_for_" + text_file)
+    if os.path.isfile(chatgpt_grounding_path):
+        with open(chatgpt_grounding_path, "r") as f:
+            chatgpt_grounding = json.load(f)
+    else:
+        chatgpt_grounding = {}
+    
     n_entity_correct = 0
     n_mvmt_correct = 0
     for i in tqdm(range(len(text_tuples))):
         entity_id_gt, movement_id_gt, text = text_tuples[i]
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo", 
-            messages=[{"role": "user", "content": PROMPT_TEMPLATE % text}]
-        )["choices"][0]["message"]["content"]
-        entity_id, movement_id = (response + ",").replace(" ", "").split(",")[:2]
-        entity_id = int(entity_id) if entity_id.isdigit() else -1
-        entity_id = entity_id if entity_id in ENTITY_IDS.values() else -1
-        movement_id = int(movement_id) if movement_id.isdigit() else -1
-        movement_id = movement_id if movement_id in MOVEMENT_TYPES.values() else -1
+
+        if text in chatgpt_grounding:
+            entity_id, movement_id = chatgpt_grounding[text]
+            
+        else:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo", 
+                messages=[{"role": "user", "content": PROMPT_TEMPLATE % text}]
+            )["choices"][0]["message"]["content"]
+            entity_id, movement_id = (response + ",").replace(" ", "").split(",")[:2]
+            entity_id = int(entity_id) if entity_id.isdigit() else -1
+            entity_id = entity_id if entity_id in ENTITY_IDS.values() else -1
+            movement_id = int(movement_id) if movement_id.isdigit() else -1
+            movement_id = movement_id if movement_id in MOVEMENT_TYPES.values() else -1
+            chatgpt_grounding[text] = (entity_id, movement_id)
+
+            with open(chatgpt_grounding_path, "w") as f:
+                json.dump(chatgpt_grounding, f)
 
         if entity_id == entity_id_gt:
             n_entity_correct += 1
         if movement_id == movement_id_gt:
             n_mvmt_correct += 1
-        chatgpt_grounding[text] = (entity_id, movement_id)
-    
+
     print(f"entities correct: {n_entity_correct}/{len(text_tuples)}")
     print(f"mvmts correct: {n_mvmt_correct}/{len(text_tuples)}")
-
-    with open(os.path.join(TEXT_DIR, "chatgpt_grounding_for_" + text_file), "w") as f:
-        json.dump(chatgpt_grounding, f)
