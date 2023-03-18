@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import openai
 
 from tqdm import tqdm
@@ -77,6 +78,7 @@ for text_file in TEXT_FILES:
             entity_id, movement_id = chatgpt_grounding[text]
             
         else:
+            time.sleep(0.3)
             response = openai.ChatCompletion.create(
                 model="gpt-3.5-turbo", 
                 messages=[{"role": "user", "content": PROMPT_TEMPLATE % text}]
