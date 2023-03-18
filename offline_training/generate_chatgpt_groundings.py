@@ -37,7 +37,7 @@ entity ID, movement ID
 For example, an appropriately formatted response is:
 2, 0
 
-What is the entity ID and movement ID that correspond to the following description?
+Respond with the best choices from the provided lists even if they are not perfect answers. What is the entity ID and movement ID that best correspond to the following description?
 %s
 """
 
