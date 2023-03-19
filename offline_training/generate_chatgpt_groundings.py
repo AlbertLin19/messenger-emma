@@ -64,7 +64,7 @@ for text_file in TEXT_FILES:
     
     version = 0
     chatgpt_grounding_path = os.path.join(TEXT_DIR, "chatgpt_grounding_for_" + text_file)
-    while os.path.join(TEXT_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file).isfile():
+    while os.path.isfile(os.path.join(TEXT_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)):
         chatgpt_grounding_path = os.path.join(TEXT_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)
         version += 1
     if os.path.isfile(chatgpt_grounding_path):
@@ -96,6 +96,9 @@ for text_file in TEXT_FILES:
 
         elif version > 0 and old_chatgpt_grounding[text][0] >= 0 and old_chatgpt_grounding[text][1] >= 0:
             entity_id, movement_id = old_chatgpt_grounding[text]
+            chatgpt_grounding[text] = (entity_id, movement_id)
+            with open(chatgpt_grounding_path, "w") as f:
+                json.dump(chatgpt_grounding, f)
             
         else:
             time.sleep(0.2)
