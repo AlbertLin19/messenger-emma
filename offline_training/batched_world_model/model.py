@@ -8,10 +8,11 @@ from offline_training.batched_world_model.modules import BatchedEncoder, Batched
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 class BatchedWorldModel(nn.Module):
-    def __init__(self, key_type, key_dim, val_type, val_dim, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
         self.latent_size = latent_size 
+        self.memory_type = memory_type
         self.hidden_size = hidden_size
         self.batch_size = batch_size
 
@@ -93,7 +94,15 @@ class BatchedWorldModel(nn.Module):
 
         emb_dim = val_dim + len(self.relevant_cls_idxs)
         self.encoder = BatchedEncoder(emb_dim, latent_size).to(device)
-        self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
+        if self.memory_type == "mlp":
+            self.mlp = nn.Sequential(
+                nn.Linear(latent_size + 5, hidden_size),
+                nn.ReLU(),
+            ).to(device)
+        elif self.memory_type == "lstm":
+            self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
+        else:
+            raise NotImplementedError
         self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
         if prediction_type == "location":
             self.nonexistence = nn.Linear(in_features=latent_size, out_features=17).to(device)
@@ -154,9 +163,15 @@ class BatchedWorldModel(nn.Module):
     def forward(self, multilabels, manuals, ground_truths, actions, lstm_states):
         latents = self.encode(batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, self))
         actions = F.one_hot(actions, num_classes=5)
-        lstm_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
-        lstm_outs, (hidden_states, cell_states) = self.lstm(lstm_ins, lstm_states)
-        pred_latents = self.projection(lstm_outs.squeeze(0))
+        mem_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
+        if self.memory_type == "mlp":
+            mem_outs = self.mlp(mem_ins)
+            hidden_states, cell_states = None, None
+        elif self.memory_type == "lstm":
+            mem_outs, (hidden_states, cell_states) = self.lstm(mem_ins, lstm_states)
+        else:
+            raise NotImplementedError
+        pred_latents = self.projection(mem_outs.squeeze(0))
         pred_nonexistence_logits = None
         if self.prediction_type == "location":
             pred_nonexistence_logits = self.nonexistence(pred_latents)
