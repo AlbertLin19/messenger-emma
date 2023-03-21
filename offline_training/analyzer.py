@@ -56,6 +56,11 @@ class Analyzer:
 
         self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
 
+        self.ln_perplexity = 0
+        self.ln_perplexity_count = 0
+        # self.normalized_ln_perplexity = 0
+        # self.normalized_ln_perplexity_count = 0
+
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
         manuals, tokens = descriptors_tuple
@@ -116,6 +121,13 @@ class Analyzer:
                         missing = (self.game_grounding.sum(dim=-1) == 0).any()
                         if not missing:
                             break
+
+            # accumulate ln_perplexity and normalized_ln_perplexity
+            all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
+            true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
+            all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
+            ln_perplexity += torch.sum(all_true_probs*torch.log(all_pred_probs)[cur_idxs]).item()
+            ln_perplexity_count += len(cur_idxs)
 
     def getLog(self, step):
         log = {}
@@ -191,6 +203,12 @@ class Analyzer:
             # log game_grounding as an alternative
             if not (self.game_grounding.sum(dim=-1) == 0).any():
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
+
+            # log perplexity and normalized_perplexity
+            log.update({
+                'perplexity': np.exp(self.ln_perplexity / self.ln_perplexity_count),
+                # 'normalized_perplexity': np.exp(self.normalized_ln_perplexity / self.normalized_ln_perplexity_count),
+            })
                         
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)

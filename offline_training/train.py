@@ -143,6 +143,8 @@ def train(args):
                 "step": step,
                 "real_loss": real_loss,
                 "imag_loss": imag_loss,
+                "real_loss_perplexity": np.exp(real_loss),
+                "imag_loss_perplexity": np.exp(imag_loss),
             }
             wandb.log(updatelog)
 
@@ -182,6 +184,8 @@ def train(args):
                 "step": step,
                 "val_real_loss": val_real_loss,
                 "val_imag_loss": val_imag_loss,
+                "val_real_loss_perplexity": np.exp(val_real_loss),
+                "val_imag_loss_perplexity": np.exp(val_imag_loss),
             }
             eval_log.update(train_all_real_analyzer.getLog(step))
             eval_log.update(train_all_imag_analyzer.getLog(step))
