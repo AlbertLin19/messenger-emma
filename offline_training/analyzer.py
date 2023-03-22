@@ -56,10 +56,10 @@ class Analyzer:
 
         self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
 
-        self.ln_perplexity = 0
-        self.ln_perplexity_count = 0
-        # self.normalized_ln_perplexity = 0
-        # self.normalized_ln_perplexity_count = 0
+        self.ln_perplexities = torch.zeros(17, dtype=float, device=self.device)
+        self.ln_perplexity_counts = torch.zeros(17, dtype=int, device=self.device)
+        # self.normalized_ln_perplexities = 0
+        # self.normalized_ln_perplexity_counts = 0
 
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
@@ -122,12 +122,12 @@ class Analyzer:
                         if not missing:
                             break
 
-            # accumulate ln_perplexity and normalized_ln_perplexity
+            # accumulate ln_perplexities and normalized_ln_perplexities
             all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
             true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
             all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
-            self.ln_perplexity -= torch.sum((all_true_probs*torch.log(all_pred_probs))[cur_idxs]).item()
-            self.ln_perplexity_count += len(cur_idxs)
+            self.ln_perplexities -= torch.sum((all_true_probs*torch.log(all_pred_probs))[cur_idxs], dim=(0, 2)).item()
+            self.ln_perplexity_counts += len(cur_idxs)
 
     def getLog(self, step):
         log = {}
@@ -204,10 +204,10 @@ class Analyzer:
             if not (self.game_grounding.sum(dim=-1) == 0).any():
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
 
-            # log perplexity and normalized_perplexity
+            # log perplexities and normalized_perplexities
             log.update({
-                'perplexity': np.exp(self.ln_perplexity / self.ln_perplexity_count),
-                # 'normalized_perplexity': np.exp(self.normalized_ln_perplexity / self.normalized_ln_perplexity_count),
+                'perplexity_{i}': np.exp(self.ln_perplexities[i] / self.ln_perplexity_counts[i] for i in self.relevant_cls_idxs),
+                # 'normalized_perplexity_{i}': np.exp(self.normalized_ln_perplexities[i] / self.normalized_ln_perplexity_counts[i] for i in self.relevant_cls_idxs),
             })
                         
         for key in list(log.keys()):
