@@ -58,10 +58,10 @@ class Analyzer:
 
         self.ln_perplexities = torch.zeros(17, dtype=float, device=self.device)
         self.ln_perplexity_counts = torch.zeros(17, dtype=int, device=self.device)
-        # self.normalized_ln_perplexities = 0
-        # self.normalized_ln_perplexity_counts = 0
+        self.nontrivial_ln_perplexities = torch.zeros(17, dtype=float, device=self.device)
+        self.nontrivial_ln_perplexity_counts = torch.zeros(17, dtype=int, device=self.device)
 
-    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, timesteps):
+    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
         manuals, tokens = descriptors_tuple
         new_idxs, cur_idxs = idxs_tuple
@@ -122,12 +122,20 @@ class Analyzer:
                         if not missing:
                             break
 
-            # accumulate ln_perplexities and normalized_ln_perplexities
-            all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
+            # accumulate ln_perplexities
+            all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1) # B x 17 x 101
+            all_pred_log_probs = torch.log(all_pred_probs)
             true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
-            all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
-            self.ln_perplexities -= torch.sum((all_true_probs*torch.log(all_pred_probs))[cur_idxs], dim=(0, 2)).item()
+            all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1)
+            self.ln_perplexities -= torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=(0, 2))
             self.ln_perplexity_counts += len(cur_idxs)
+
+            # accumulate nontrivial_ln_perplexities
+            # using entity_ids: B x 3 array, where each row holds the 3 entity ids of a game
+            entity_masks = torch.sum(F.one_hot(entity_ids, num_classes=17), dim=1).unsqueeze(-1) # B x 17 x 1
+            entity_masks[:, 15:17] = 1 # avatar with/without message is always possible in a game
+            self.nontrivial_ln_perplexities -= torch.sum((entity_masks*all_true_probs*all_pred_log_probs)[cur_idxs], dim=(0, 2))
+            self.nontrivial_ln_perplexity_counts += torch.sum(entity_masks[cur_idxs], dim=0).squeeze(-1)
 
     def getLog(self, step):
         log = {}
@@ -204,11 +212,9 @@ class Analyzer:
             if not (self.game_grounding.sum(dim=-1) == 0).any():
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
 
-            # log perplexities and normalized_perplexities
-            log.update({
-                'perplexity_{i}': np.exp(self.ln_perplexities[i] / self.ln_perplexity_counts[i] for i in self.relevant_cls_idxs),
-                # 'normalized_perplexity_{i}': np.exp(self.normalized_ln_perplexities[i] / self.normalized_ln_perplexity_counts[i] for i in self.relevant_cls_idxs),
-            })
+            # log perplexities
+            log.update({f'perplexity_{i}': np.exp((self.ln_perplexities[i] / self.ln_perplexity_counts[i]).cpu().numpy()) for i in self.relevant_cls_idxs})
+            log.update({f'nontrivial_perplexity_{i}': np.exp((self.nontrivial_ln_perplexities[i] / self.nontrivial_ln_perplexity_counts[i]).cpu().numpy()) for i in self.relevant_cls_idxs})
                         
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)

@@ -154,8 +154,8 @@ def train(args):
 
         # push results to analyzers and run eval
         if step % args.eval_step > (args.eval_step - args.eval_length):
-            train_all_real_analyzer.push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), tensor_timesteps)
-            train_all_imag_analyzer.push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), tensor_timesteps)
+            train_all_real_analyzer.push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.real_entity_ids, tensor_timesteps)
+            train_all_imag_analyzer.push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.imag_entity_ids, tensor_timesteps)
 
             # run eval
             with torch.no_grad():
@@ -173,8 +173,8 @@ def train(args):
                 eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
                 eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
 
-            val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_tensor_timesteps)
-            val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), val_tensor_timesteps)
+            val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.real_entity_ids, val_tensor_timesteps)
+            val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.imag_entity_ids, val_tensor_timesteps)
 
         # log results
         if step % args.eval_step == 0:
