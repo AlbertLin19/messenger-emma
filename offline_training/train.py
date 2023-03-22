@@ -230,7 +230,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_prediction_type", default="location", choices=["existence", "class", "location"], help="What the model predicts.")
-    parser.add_argument("--world_model_memory_type", default="lstm", choices=["mlp", "lstm"], help="NN type for memory module of world model.")
+    parser.add_argument("--world_model_memory_type", default="mlp", choices=["mlp", "lstm"], help="NN type for memory module of world model.")
     
     # Dataset arguments
     parser.add_argument("--dataset_path", default="datasets/stage_2_same_worlds_dataset.pickle", help="path to the dataset file")

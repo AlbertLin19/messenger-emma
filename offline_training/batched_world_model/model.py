@@ -178,16 +178,16 @@ class BatchedWorldModel(nn.Module):
         pred_logits = self.detect(self.decode(pred_latents))
         return (pred_logits, pred_nonexistence_logits), (hidden_states, cell_states)
 
-    def loss_sum(self, logits, nonexistence_logits, probs):
+    def loss(self, logits, nonexistence_logits, probs):
         if self.prediction_type == "existence":
-            loss = F.binary_cross_entropy_with_logits(logits, probs, pos_weight=self.pos_weight, reduction="sum")   
+            loss = F.binary_cross_entropy_with_logits(logits, probs, pos_weight=self.pos_weight)   
         elif self.prediction_type == "class":
-            loss = F.cross_entropy(logits.flatten(0, 2), probs.flatten(0, 2), weight=self.cls_weight, reduction="sum")
+            loss = F.cross_entropy(logits.flatten(0, 2), probs.flatten(0, 2), weight=self.cls_weight)
         elif self.prediction_type == "location":
             all_logits = torch.cat((logits.permute(0, 3, 1, 2).flatten(2, 3), nonexistence_logits.unsqueeze(-1)), dim=-1).flatten(0, 1)
             nonexistence_probs = 1.0*(torch.sum(probs, dim=(1, 2)) <= 0)
             all_probs = torch.cat((probs.permute(0, 3, 1, 2).flatten(2, 3), nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
-            loss = F.cross_entropy(all_logits, all_probs, weight=self.loc_weight, reduction="sum")
+            loss = F.cross_entropy(all_logits, all_probs, weight=self.loc_weight)
         else:
             raise NotImplementedError
         return loss
@@ -257,9 +257,10 @@ class BatchedWorldModel(nn.Module):
         probs = self.multilabel_to_prob(multilabels)
 
         (pred_logits, pred_nonexistence_logits), (self.real_hidden_states, self.real_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.real_hidden_states, self.real_cell_states))
-        loss_sum = self.loss_sum(pred_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
-        self.real_loss_total += loss_sum
-        self.real_backprop_count += len(backprop_idxs)
+        loss = self.loss(pred_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
+        n_backprops = len(backprop_idxs)
+        self.real_loss_total += n_backprops*loss
+        self.real_backprop_count += n_backprops
 
         with torch.no_grad():
             pred_probs, pred_nonexistence_probs = self.logit_to_prob(pred_logits, pred_nonexistence_logits)
@@ -272,9 +273,10 @@ class BatchedWorldModel(nn.Module):
         probs = self.multilabel_to_prob(multilabels)
 
         (pred_logits, pred_nonexistence_logits), (self.imag_hidden_states, self.imag_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.imag_hidden_states, self.imag_cell_states))
-        loss_sum = self.loss_sum(pred_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
-        self.imag_loss_total += loss_sum
-        self.imag_backprop_count += len(backprop_idxs)
+        loss = self.loss(pred_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
+        n_backprops = len(backprop_idxs)
+        self.imag_loss_total += n_backprops*loss
+        self.imag_backprop_count += n_backprops
 
         with torch.no_grad():
             pred_probs, pred_nonexistence_probs = self.logit_to_prob(pred_logits, pred_nonexistence_logits)
