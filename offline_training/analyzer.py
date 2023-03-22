@@ -126,8 +126,8 @@ class Analyzer:
             all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
             true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
             all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
-            ln_perplexity += torch.sum(all_true_probs*torch.log(all_pred_probs)[cur_idxs]).item()
-            ln_perplexity_count += len(cur_idxs)
+            self.ln_perplexity -= torch.sum((all_true_probs*torch.log(all_pred_probs))[cur_idxs]).item()
+            self.ln_perplexity_count += len(cur_idxs)
 
     def getLog(self, step):
         log = {}
