@@ -29,22 +29,22 @@ class DataLoader:
     def reset(self):
         # randomly sample batch_size rollouts from data (with probability proportional to their lengths) and keep track of their lengths
         self.indices = np.random.choice(self.n_rollouts, size=self.batch_size, p=self.rollout_probs)
-        self.remaining_lengths = self.rollout_lengths[self.indices] - 1
-        return self.grid_sequences_array[self.indices, 0], self.action_sequences_array[self.indices, 0], self.manuals_array[self.indices], self.ground_truths_array[self.indices]
+        # randomly sample starting state for each rollout
+        self.timesteps = (np.random.rand(self.batch_size)*(self.rollout_lengths[self.indices] - 1)).astype(int)
+        return self.grid_sequences_array[self.indices, self.timesteps], self.action_sequences_array[self.indices, self.timesteps], self.manuals_array[self.indices], self.ground_truths_array[self.indices]
 
     def step(self):
-        self.remaining_lengths -= 1
-        new_idxs = np.argwhere(self.remaining_lengths < 0).squeeze(-1)
-        cur_idxs = np.argwhere(self.remaining_lengths >= 0).squeeze(-1)
+        self.timesteps += 1
+        new_idxs = np.argwhere(self.timesteps >= self.rollout_lengths[self.indices]).squeeze(-1)
+        cur_idxs = np.logical_not(new_idxs)
         self.indices[new_idxs] = np.random.choice(self.n_rollouts, size=len(new_idxs), p=self.rollout_probs)
-        self.remaining_lengths[new_idxs] = self.rollout_lengths[self.indices[new_idxs]] - 1
+        self.timesteps[new_idxs] = (np.random.rand(len(new_idxs))*(self.rollout_lengths[self.indices[new_idxs]] - 1)).astype(int)
 
-        timesteps = self.rollout_lengths[self.indices] - self.remaining_lengths - 1
         return (
-            self.grid_sequences_array[self.indices, timesteps], 
-            self.action_sequences_array[self.indices, timesteps], 
+            self.grid_sequences_array[self.indices, self.timesteps], 
+            self.action_sequences_array[self.indices, self.timesteps], 
             self.manuals_array[self.indices], 
             self.ground_truths_array[self.indices], 
             (new_idxs, cur_idxs), 
-            timesteps
+            self.timesteps
         )
