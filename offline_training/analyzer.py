@@ -56,10 +56,10 @@ class Analyzer:
 
         self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
 
-        self.ln_perplexities = torch.zeros(17, dtype=float, device=self.device)
-        self.ln_perplexity_counts = torch.zeros(17, dtype=int, device=self.device)
-        self.nontrivial_ln_perplexities = torch.zeros(17, dtype=float, device=self.device)
-        self.nontrivial_ln_perplexity_counts = torch.zeros(17, dtype=int, device=self.device)
+        self.ln_perplexities = torch.zeros((self.max_rollout_length, 17), dtype=float, device=self.device)
+        self.ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.nontrivial_ln_perplexities = torch.zeros((self.max_rollout_length, 17), dtype=float, device=self.device)
+        self.nontrivial_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
 
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
@@ -127,15 +127,15 @@ class Analyzer:
             all_pred_log_probs = torch.log(all_pred_probs)
             true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
             all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1)
-            self.ln_perplexities -= torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=(0, 2))
-            self.ln_perplexity_counts += len(cur_idxs)
+            self.ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
+            self.ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.ones(len(cur_idxs), 17))
 
             # accumulate nontrivial_ln_perplexities
             # using entity_ids: B x 3 array, where each row holds the 3 entity ids of a game
-            entity_masks = torch.sum(F.one_hot(entity_ids, num_classes=17), dim=1).unsqueeze(-1) # B x 17 x 1
+            entity_masks = torch.sum(F.one_hot(entity_ids, num_classes=17), dim=1) # B x 17
             entity_masks[:, 15:17] = 1 # avatar with/without message is always possible in a game
-            self.nontrivial_ln_perplexities -= torch.sum((entity_masks*all_true_probs*all_pred_log_probs)[cur_idxs], dim=(0, 2))
-            self.nontrivial_ln_perplexity_counts += torch.sum(entity_masks[cur_idxs], dim=0).squeeze(-1)
+            self.nontrivial_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((entity_masks.unsqueeze(-1)*all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
+            self.nontrivial_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=entity_masks[cur_idxs])
 
     def getLog(self, step):
         log = {}
@@ -213,8 +213,10 @@ class Analyzer:
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
 
             # log perplexities
-            log.update({f'perplexity_{i}': np.exp((self.ln_perplexities[i] / self.ln_perplexity_counts[i]).cpu().numpy()) for i in self.relevant_cls_idxs})
-            log.update({f'nontrivial_perplexity_{i}': np.exp((self.nontrivial_ln_perplexities[i] / self.nontrivial_ln_perplexity_counts[i]).cpu().numpy()) for i in self.relevant_cls_idxs})
+            perplexities = np.exp((self.ln_perplexities / self.ln_perplexity_counts).cpu().numpy())
+            nontrivial_perplexities = np.exp((self.nontrivial_ln_perplexities / self.nontrivial_ln_perplexity_counts).cpu().numpy())
+            log.update({f'perplexity_{j}_t={i}': perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
+            log.update({f'nontrivial_perplexity_{j}_t={i}': nontrivial_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
                         
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)
