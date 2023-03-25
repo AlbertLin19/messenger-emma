@@ -128,7 +128,7 @@ class Analyzer:
             true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
             all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1)
             self.ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
-            self.ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.ones(len(cur_idxs), 17))
+            self.ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.ones((len(cur_idxs), 17), dtype=int, device=self.device))
 
             # accumulate nontrivial_ln_perplexities
             # using entity_ids: B x 3 array, where each row holds the 3 entity ids of a game
