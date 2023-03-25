@@ -56,9 +56,9 @@ class Analyzer:
 
         self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
 
-        self.ln_perplexities = torch.zeros((self.max_rollout_length, 17), dtype=float, device=self.device)
+        self.ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
         self.ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
-        self.nontrivial_ln_perplexities = torch.zeros((self.max_rollout_length, 17), dtype=float, device=self.device)
+        self.nontrivial_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
         self.nontrivial_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
 
     def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
