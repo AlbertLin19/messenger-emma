@@ -9,7 +9,8 @@ MOVEMENT_TYPES = {
     "immovable": 2,
 }
 
-TEXT_DIR = "../messenger/envs/texts"
+TEXT_DIR = "../../messenger/envs/texts"
+SAVE_DIR = "../../messenger/envs/texts/chatgpt_groundings"
 TEXT_FILES = ["text_train.json", "text_val.json", "text_test.json"]
 
 for text_file in TEXT_FILES:
@@ -29,9 +30,9 @@ for text_file in TEXT_FILES:
                     for movement_text in movement_texts:
                         text_tuples.append((ENTITY_IDS[entity_type], MOVEMENT_TYPES[movement_type], movement_text))
     
-    chatgpt_grounding_paths = [os.path.join(TEXT_DIR, "chatgpt_grounding_for_" + text_file)]
-    while os.path.isfile(os.path.join(TEXT_DIR, f"refined_{len(chatgpt_grounding_paths)}_chatgpt_grounding_for_" + text_file)):
-        chatgpt_grounding_paths.append(os.path.join(TEXT_DIR, f"refined_{len(chatgpt_grounding_paths)}_chatgpt_grounding_for_" + text_file))
+    chatgpt_grounding_paths = [os.path.join(SAVE_DIR, "chatgpt_grounding_for_" + text_file)]
+    while os.path.isfile(os.path.join(SAVE_DIR, f"refined_{len(chatgpt_grounding_paths)}_chatgpt_grounding_for_" + text_file)):
+        chatgpt_grounding_paths.append(os.path.join(SAVE_DIR, f"refined_{len(chatgpt_grounding_paths)}_chatgpt_grounding_for_" + text_file))
     for i in range(len(chatgpt_grounding_paths)):
         with open(chatgpt_grounding_paths[i], "r") as f:
             chatgpt_grounding = json.load(f)

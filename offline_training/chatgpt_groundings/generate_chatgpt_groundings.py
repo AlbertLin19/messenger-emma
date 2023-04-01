@@ -42,7 +42,8 @@ Respond with the best choices from the provided lists even if they are not perfe
 %s
 """
 
-TEXT_DIR = "../messenger/envs/texts"
+TEXT_DIR = "../../messenger/envs/texts"
+SAVE_DIR = "../../messenger/envs/texts/chatgpt_groundings"
 TEXT_FILES = ["text_train.json", "text_val.json", "text_test.json"]
 
 for text_file in TEXT_FILES:
@@ -63,23 +64,23 @@ for text_file in TEXT_FILES:
                         text_tuples.append((ENTITY_IDS[entity_type], MOVEMENT_TYPES[movement_type], movement_text))
     
     version = 0
-    chatgpt_grounding_path = os.path.join(TEXT_DIR, "chatgpt_grounding_for_" + text_file)
-    while os.path.isfile(os.path.join(TEXT_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)):
-        chatgpt_grounding_path = os.path.join(TEXT_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)
+    chatgpt_grounding_path = os.path.join(SAVE_DIR, "chatgpt_grounding_for_" + text_file)
+    while os.path.isfile(os.path.join(SAVE_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)):
+        chatgpt_grounding_path = os.path.join(SAVE_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)
         version += 1
     if os.path.isfile(chatgpt_grounding_path):
         with open(chatgpt_grounding_path, "r") as f:
             chatgpt_grounding = json.load(f)
             if len(chatgpt_grounding.keys()) == len(text_tuples):
-                chatgpt_grounding_path = os.path.join(TEXT_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)
+                chatgpt_grounding_path = os.path.join(SAVE_DIR, f"refined_{version+1}_chatgpt_grounding_for_" + text_file)
                 version += 1
                 old_chatgpt_grounding = chatgpt_grounding
                 chatgpt_grounding = {}
             else:
                 if version > 1:
-                    old_chatgpt_grounding_path = os.path.join(TEXT_DIR, f"refined_{version-1}_chatgpt_grounding_for_" + text_file)
+                    old_chatgpt_grounding_path = os.path.join(SAVE_DIR, f"refined_{version-1}_chatgpt_grounding_for_" + text_file)
                 else:
-                    old_chatgpt_grounding_path = os.path.join(TEXT_DIR, "chatgpt_grounding_for_" + text_file)
+                    old_chatgpt_grounding_path = os.path.join(SAVE_DIR, "chatgpt_grounding_for_" + text_file)
                 with open(old_chatgpt_grounding_path, "r") as g:
                     old_chatgpt_grounding = json.load(g)
     else:
