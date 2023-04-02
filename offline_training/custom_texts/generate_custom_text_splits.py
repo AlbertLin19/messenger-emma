@@ -128,5 +128,17 @@ for i in range(len(ENTITIES)):
                 start_idx = np.sum(proportional_counts[i, j, k, :l])
                 end_idx = start_idx + proportional_counts[i, j, k, l]
                 split_texts[ENTITIES[i]][DYNAMICS[j]][ROLES[k]][SPLIT_NAMES[l]] = descriptors[start_idx:end_idx]
-with open(os.path.join(SAVE_DIR, "text_splits.json"), "w") as f:
+with open(os.path.join(SAVE_DIR, "custom_text_splits.json"), "w") as f:
     json.dump(split_texts, f)
+
+# verify that the texts are properly split
+descriptors = []
+for entity, entity_descriptors in split_texts.items():
+    for dynamic, dynamic_descriptors in entity_descriptors.items():
+        for role, role_descriptors in dynamic_descriptors.items():
+            for split, split_descriptors in role_descriptors.items():
+                for split_descriptor in split_descriptors:
+                    assert split_descriptor not in descriptors 
+                    descriptors.append(split_descriptor)
+assert len(descriptors) == descriptor_counts.sum()
+print("verified")
