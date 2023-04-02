@@ -127,6 +127,11 @@ register(
 )
 
 register(
+    id = "msgr-custom-v2",
+    entry_point="messenger.envs:StageTwoCustom",
+)
+
+register(
     id = "msgr-train-v3",
     entry_point="messenger.envs:TwoEnvWrapper",
     kwargs = dict(

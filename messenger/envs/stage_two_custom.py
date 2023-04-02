@@ -1,35 +1,83 @@
 '''
 Classes that follows a gym-like interface and implements stage two of the Messenger
-environment.
+environment. Uses custom assignments of entity-dynamic-role.
 '''
 
-import json
 import random
-from collections import namedtuple
+import os
 from pathlib import Path
 from os import environ
-import re
 
 # hack to stop PyGame from printing to stdout
 environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "hide"
 
 from vgdl.interfaces.gym import VGDLEnv
-import numpy as np
 
 from messenger.envs.base import MessengerEnv, Grid, Position
 import messenger.envs.config as config
-from messenger.envs.manual import TextManual
-from messenger.envs.utils import games_from_json
+from messenger.envs.utils import get_game
 
+GAME_FILE_TEMPLATE = """
+BasicGame block_size=2
+	SpriteSet
+		background > Immovable randomtiling=0.9 img=oryx/floor3 hidden=True
+		root >
+			enemy > %s stype=avatar speed=0.5 img=oryx/alien1
+			message > %s stype=avatar speed=0.5 img=oryx/bear1
+			goal > %s stype=avatar speed=0.5 img=oryx/cyclop1
+			wall > Immovable img=oryx/wall11
+			avatar > MovingAvatar
+				no_message > img=oryx/swordman1_0
+				with_message > img=oryx/swordmankey1_0
+	InteractionSet
+		root wall > stepBack
+		root EOS > stepBack
+		avatar enemy > killSprite scoreChange=-1
+		no_message goal > killSprite scoreChange=-1
+		no_message message > transformTo stype=with_message scoreChange=0.5
+		message avatar > killSprite
+		goal with_message > killSprite scoreChange=1
+	TerminationSet
+		SpriteCounter stype=avatar limit=0 win=False
+		SpriteCounter stype=goal limit=0 win=True
+	LevelMapping
+		. > background
+		E > background enemy
+		M > background message
+		G > background goal
+		X > background no_message
+		Y > background with_message
+		W > background wall
+"""
 
-# specifies the game variant (e.g. chasing enemy, fleeing message, stationary goal)
-# path is path to the vgdl domain file describing the variant.
-GameVariant = namedtuple(
-    "GameVariant", ["path", "enemy_type", "message_type", "goal_type"]
-)
+ENTITY_KEYWORD_TABLE = {
+    "robot": "robot",
+    "airplane": "airplane",
+    "thief": "thief",
+    "scientist": "scientist",
+    "queen": "queen",
+    "ship": "ship",
+    "dog": "dog",
+    "bird": "bird",
+    "fish": "fish",
+    "mage": "mage",
+    "orb": "ball",
+    "sword": "sword",
+}
 
+VGDL_MOVEMENT_KEYWORD_TABLE = {
+    'fleeing': 'Fleeing',
+    'immobile': 'Immovable',
+    'chasing': 'Chaser',
+}
 
-class StageTwo(MessengerEnv):
+MESSENGER_MOVEMENT_KEYWORD_TABLE = {
+    'fleeing': 'fleeing',
+    'immobile': 'immovable',
+    'chasing': 'chaser',
+}
+
+class StageTwoCustom(MessengerEnv):
     '''
     Full messenger environment with mobile sprites. Uses Py-VGDL as game engine.
     To avoid the need to instantiate a large number of games, (since there are
@@ -38,79 +86,21 @@ class StageTwo(MessengerEnv):
     into entities (e.g. alien, knight, mage).
     '''
 
-    def __init__(self, split:str, shuffle_obs=True, fix_order=False):
+    def __init__(self, shuffle_obs=True):
         super().__init__()
         self.shuffle_obs = shuffle_obs # shuffle the entity layers
+        self.this_folder = Path(__file__).parent
 
-        this_folder = Path(__file__).parent
-        # Get the games and manual
-        games_json_path = this_folder.joinpath("games.json")
-        if "train" in split and "mc" in split: # multi-combination games
-            game_split = "train_multi_comb"
-            text_json_path = this_folder.joinpath("texts", "text_train.json")
-        elif "train" in split and "sc" in split: # single-combination games
-            game_split = "train_single_comb"
-            text_json_path = this_folder.joinpath("texts", "text_train.json")
-        elif "train" in split and "all" in split: # single-combination and multi-combination games
-            game_split = "train_all"
-            text_json_path = this_folder.joinpath("texts", "text_train.json")
-        elif "val" in split:
-            if "val_same_worlds" in split:
-                game_split = "val_same_worlds"
-            else:
-                game_split = "val"
-            text_json_path = this_folder.joinpath("texts", "text_val.json")
-        elif "test" in split:
-            if "test_same_worlds" in split:
-                game_split = "test_same_worlds"
-            else:
-                game_split = "test"
-            text_json_path = this_folder.joinpath("texts", "text_test.json")
-        else:
-            raise Exception(f"Split: {split} not understood.")
-
-        # list of Game namedtuples
-        self.all_games = games_from_json(json_path=games_json_path, split=game_split)
-        self.text_manual = TextManual(json_path=text_json_path)
-
-        # get the folder that has the game variants and init_states
-        if "test" in split and "se" not in split: # new dynamics (se for state estimation)
-            vgdl_files = this_folder.joinpath("vgdl_files", "stage_2_nd")
-        else: # training dynamics
-            vgdl_files = this_folder.joinpath("vgdl_files", "stage_2")
+        with open(self.this_folder.joinpath("texts", "custom_text_splits", "custom_text_splits.json"), "r") as f:
+            self.custom_text_splits = json.load(f)
         
-        # get the file paths to possible starting states
         self.init_states = [
-            str(path) for path in vgdl_files.joinpath("init_states").glob("*.txt")
-        ]
-        # get all the game variants
-        self.game_variants = [
-            self._get_variant(path) for path in vgdl_files.joinpath("variants").glob("*.txt")
+            str(path) for path in self.this_folder.joinpath("vgdl_files", "stage_2", "init_states").glob("*.txt")
         ]
 
         # entities tracked by VGDLEnv
         self.notable_sprites = ["enemy", "message", "goal", "no_message", "with_message"]
         self.env = None # the VGDLEnv
-
-        self.fix_order = fix_order
-        self.next_game_idx = 0
-        self.next_variant_idx = 0
-        self.next_init_state_idx = 0
-
-    def _get_variant(self, variant_file:Path) -> GameVariant:
-        '''
-        Return the GameVariant for the variant specified by variant_file. 
-        Searches through the vgdl code to find the correct type:
-        {chaser, fleeing, immovable}
-        '''
-
-        code = variant_file.read_text()
-        return GameVariant(
-            path = str(variant_file),
-            enemy_type = re.search(r'enemy > (\S+)', code)[1].lower(),
-            message_type = re.search(r'message > (\S+)', code)[1].lower(),
-            goal_type = re.search(r'goal > (\S+)', code)[1].lower()
-        )
 
     def _convert_obs(self, vgdl_obs):
         '''
@@ -158,31 +148,39 @@ class StageTwo(MessengerEnv):
 
         return {"entities": entity_locs.grid, "avatar": avatar_locs.grid}
 
-    def reset(self, **kwargs):
+    def reset(self, split, entities, **kwargs):
         '''
         Resets the current environment. NOTE: We remake the environment each time.
         This is a workaround to a bug in py-vgdl, where env.reset() does not
         properly reset the environment. kwargs go to get_document().
+
+        split is one of the split keywords in custom splits
+        entities is one of the games in a custom split
         '''
 
-        if not self.fix_order:
-            self.next_game_idx = random.randrange(len(self.all_games))
-        self.game = self.all_games[self.next_game_idx] # (e.g. enemy-alien, message-knight, goal - bear)
+        entities_by_role = {
+            'enemy': None,
+            'message': None,
+            'goal': None,
+        }
+        for entity in entities:
+            entities_by_role[entity[2]] = [entity[0], entity[1]]
+        if None in entities_by_role.values():
+            raise RuntimeError
+        self.game = get_game((ENTITY_KEYWORD_TABLE[entities_by_role['enemy'][0]], ENTITY_KEYWORD_TABLE[entities_by_role['message'][0]], ENTITY_KEYWORD_TABLE[entities_by_role['goal'][0]]))
 
-        # choose the game variant (e.g. enmey-chasing, message-fleeing, goal-static)
-        # and initial starting location of the entities.
-        if not self.fix_order:
-            self.next_variant_idx = random.randrange(len(self.game_variants))
-        variant = self.game_variants[self.next_variant_idx]
-
-        if not self.fix_order:
-            self.next_init_state_idx = random.randrange(len(self.init_states))
-        init_state = self.init_states[self.next_init_state_idx] # inital state file
+        game_file_path = self.this_folder.joinpath('custom_game_file.txt')
+        with open(game_file_path, 'w') as f:
+            f.write(GAME_FILE_TEMPLATE % (
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['enemy'][1]],
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['message'][1]], 
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['goal'][1]], 
+            ))
 
         # args that will go into VGDL Env.
         self._envargs = {
-            'game_file': variant.path,
-            'level_file': init_state,
+            'game_file': game_file_path,
+            'level_file': random.choice(self.init_states),
             'notable_sprites': self.notable_sprites.copy(),
             'obs_type': 'objects', # track the objects
             'block_size': 34  # rendering block size
@@ -190,29 +188,12 @@ class StageTwo(MessengerEnv):
         self.env = VGDLEnv(**self._envargs)
         vgdl_obs = self.env.reset()
 
-        manual = self.text_manual.get_document(
-            enemy=self.game.enemy.name,
-            message=self.game.message.name,
-            goal=self.game.goal.name,
-            enemy_type=variant.enemy_type,
-            message_type=variant.message_type,
-            goal_type=variant.goal_type,
-            **kwargs
-        )
+        os.remove(game_file_path)
+
+        manual = [random.choice(self.custom_text_splits[entity[0]][entity[1]][entity[2]][split]) for entity in entities]
 
         if self.shuffle_obs:
             random.shuffle(manual)
-
-        if self.fix_order:
-            self.next_game_idx += 1
-            if self.next_game_idx >= len(self.all_games):
-                self.next_game_idx = 0
-                self.next_variant_idx += 1
-                if self.next_variant_idx >= len(self.game_variants):
-                    self.next_variant_idx = 0
-                    self.next_init_state_idx += 1
-                    if self.next_init_state_idx >= len(self.init_states):
-                        self.next_init_state_idx = 0
             
         return self._convert_obs(vgdl_obs), manual
 
