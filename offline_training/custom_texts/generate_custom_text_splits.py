@@ -54,7 +54,7 @@ ROLES = [
 TEXT_DIR = "../../messenger/envs/texts"
 SAVE_DIR = "../../messenger/envs/texts/custom_text_splits"
 TEXT_FILES = ["text_train.json", "text_val.json", "text_test.json"]
-SPLITS_PATH = "../datasets/splits.json"
+SPLITS_PATH = "../custom_dataset/splits.json"
 
 with open(SPLITS_PATH, "r") as f:
     splits = json.load(f)

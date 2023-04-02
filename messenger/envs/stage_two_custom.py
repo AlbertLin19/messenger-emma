@@ -4,6 +4,7 @@ environment. Uses custom assignments of entity-dynamic-role.
 '''
 
 import random
+import json
 import os
 from pathlib import Path
 from os import environ
@@ -191,11 +192,9 @@ class StageTwoCustom(MessengerEnv):
         os.remove(game_file_path)
 
         manual = [random.choice(self.custom_text_splits[entity[0]][entity[1]][entity[2]][split]) for entity in entities]
-
-        if self.shuffle_obs:
-            random.shuffle(manual)
+        ground_truth = [(entity[0], entity[1], entity[2]) for entity in entities]
             
-        return self._convert_obs(vgdl_obs), manual
+        return self._convert_obs(vgdl_obs), manual, ground_truth
 
     def step(self, action):
         vgdl_obs, reward, done, info = self.env.step(action)
