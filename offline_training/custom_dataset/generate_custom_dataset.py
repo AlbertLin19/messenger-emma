@@ -24,13 +24,13 @@ Collect rollouts of custom games of Stage 2 using a random policy and store into
                 [(2, 1, 1), (11, 1, 2), (10, 2, 3)],
             ],
             'grid_sequences': [
-                [grid, grid, grid, ...],
+                [grid0, grid1, grid2, ...],
             ],
             'action_sequences': [
-                [action, action, action, ...],
+                [0, action0-1, action1-2, ...],
             ],
             'reward_sequences': [
-                [reward, reward, reward, ...],
+                [0, reward1, reward2, ...],
             ],
         },
     }
@@ -97,8 +97,8 @@ for split, games in splits.items():
             manual_idxs.append(manual_idx)
             ground_truth_idxs.append(ground_truth_idx)
             grid_sequence = [obs]
-            action_sequence = []
-            reward_sequence = []
+            action_sequence = [0]
+            reward_sequence = [0]
 
             done = False
             step = 1
@@ -112,8 +112,6 @@ for split, games in splits.items():
                 grid_sequence.append(obs)
                 action_sequence.append(action)
                 reward_sequence.append(reward)
-            action_sequence.append(0)
-            reward_sequence.append(0)
 
             grid_sequences.append(grid_sequence)
             action_sequences.append(action_sequence)
