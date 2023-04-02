@@ -21,7 +21,7 @@ Collect rollouts of custom games of Stage 2 using a random policy and store into
                 [2, 3, 2],
             ],
             'ground_truth_idxs': [
-                [(2, 1, 1), (11, 1, 2), (10, 2, 3)],
+                [(2, 1, 1), (11, 1, 2), (10, 2, 0)],
             ],
             'grid_sequences': [
                 [grid0, grid1, grid2, ...],
