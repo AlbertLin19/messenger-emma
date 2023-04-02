@@ -10,13 +10,18 @@ Collect rollouts of custom games of Stage 2 using a random policy and store into
             },
         },
     },
+    'keys': {
+        'entities': list(texts.keys()),
+        'dynamics': list(list(texts.values())[0].keys()),
+        'roles': list(list(list(texts.values())[0].values())[0].keys()),
+    },
     'rollouts': {
         split_name: {
             'manual_idxs': [
                 [2, 3, 2],
             ],
-            'ground_truths': [
-                [('mage', 'chasing', 'message'), ('thief', 'fleeing', 'goal'), ('dog', 'chasing', 'enemy')],
+            'ground_truth_idxs': [
+                [(2, 1, 1), (11, 1, 2), (10, 2, 3)],
             ],
             'grid_sequences': [
                 [grid, grid, grid, ...],
@@ -60,9 +65,15 @@ with open(SPLITS_PATH, "r") as f:
 
 with open(TEXTS_PATH, "r") as f:
     texts = json.load(f)
+keys = {
+    'entities': list(texts.keys()),
+    'dynamics': list(list(texts.values())[0].keys()),
+    'roles': list(list(list(texts.values())[0].values())[0].keys()),
+}
 
 dataset = {
     "texts": texts,
+    "keys": keys,
     "rollouts": {},
 }
 
@@ -71,7 +82,7 @@ env = gym.make(f'msgr-custom-v2')
 for split, games in splits.items():
     print(split)
     manual_idxs = []
-    ground_truths = []
+    ground_truth_idxs = []
     grid_sequences = []
     action_sequences = []
     reward_sequences = []
@@ -81,9 +92,10 @@ for split, games in splits.items():
             obs, manual, ground_truth = env.reset(split=split, entities=games[i])
             obs = wrap_obs(obs)
             manual_idx = [texts[ground_truth[j][0]][ground_truth[j][1]][ground_truth[j][2]][split].index(manual[j]) for j in range(len(manual))]
+            ground_truth_idx = [(keys['entities'].index(ground_truth[j][0]), keys['dynamics'].index(ground_truth[j][1]), keys['roles'].index(ground_truth[j][2])) for j in range(len(ground_truth))]
             
             manual_idxs.append(manual_idx)
-            ground_truths.append(ground_truth)
+            ground_truth_idxs.append(ground_truth_idx)
             grid_sequence = [obs]
             action_sequence = []
             reward_sequence = []
@@ -108,7 +120,7 @@ for split, games in splits.items():
             reward_sequences.append(reward_sequence)
     dataset["rollouts"][split] = {
         "manual_idxs": manual_idxs,
-        "ground_truths": ground_truths,
+        "ground_truth_idxs": ground_truth_idxs,
         "grid_sequences": grid_sequences,
         "action_sequences": action_sequences,
         "reward_sequences": reward_sequences,
