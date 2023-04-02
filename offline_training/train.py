@@ -95,7 +95,7 @@ def train(args):
             args.world_model_val_freeze = False
 
         old_tensor_grids = tensor_grids
-        manuals, ground_truths, actions, grids, rewards, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
+        manuals, ground_truths, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
         manuals, tokens = encoder.encode(manuals)
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
@@ -103,13 +103,13 @@ def train(args):
     
         # accumulate gradient
         if args.world_model_loss_source == "real":
-            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
+            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
             with torch.no_grad():
-                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
+                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
         elif args.world_model_loss_source == "imag":
-            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
+            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
             with torch.no_grad():
-                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
+                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
         else:
             raise NotImplementedError
         step += 1    

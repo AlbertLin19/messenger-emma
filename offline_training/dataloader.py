@@ -93,6 +93,7 @@ class DataLoader:
             self.action_sequences_array[self.indices, self.timesteps], 
             self.grid_sequences_array[self.indices, self.timesteps], 
             self.reward_sequences_array[self.indices, self.timesteps], 
+            self.timesteps == (self.rollout_lengths[self.indices]-1),
             (new_idxs, cur_idxs), 
             self.timesteps
         )
