@@ -17,7 +17,7 @@ from transformers import AutoModel, AutoTokenizer
 from messenger.models.utils import BatchedEncoder
 from offline_training.batched_world_model.model import BatchedWorldModel
 from dataloader import DataLoader
-from analyzer import Analyzer
+from evaluator import Evaluator
 
 def train(args):
     world_model = BatchedWorldModel(
@@ -30,6 +30,8 @@ def train(args):
         hidden_size=args.world_model_hidden_size,
         batch_size=args.batch_size,
         learning_rate=args.world_model_learning_rate,
+        reward_loss_weight=args.world_model_reward_loss_weight,
+        done_loss_weight=args.world_model_done_loss_weight,
         prediction_type=args.world_model_prediction_type,
         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
@@ -43,59 +45,45 @@ def train(args):
     with open(args.output + '_architecture.txt', 'w') as f:
         f.write(str(world_model))
 
-    eval_world_model = BatchedWorldModel(
-        key_type=args.world_model_key_type,
-        key_dim=args.world_model_key_dim,
-        val_type=args.world_model_val_type,
-        val_dim=args.world_model_val_dim,
-        memory_type=args.world_model_memory_type,
-        latent_size=args.world_model_latent_size,
-        hidden_size=args.world_model_hidden_size,
-        batch_size=args.batch_size,
-        learning_rate=args.world_model_learning_rate,
-        prediction_type=args.world_model_prediction_type,
-        pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
-        refine_pred_multilabel=args.world_model_refine_pred_multilabel,
-        device=args.device
-    )
-    eval_world_model.load_state_dict(world_model.state_dict())
-
-    # Analyzers
-    train_all_real_analyzer = Analyzer(world_model, "real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
-    train_all_imag_analyzer = Analyzer(world_model, "imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
-    val_same_worlds_real_analyzer = Analyzer(eval_world_model, "val_real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
-    val_same_worlds_imag_analyzer = Analyzer(eval_world_model, "val_imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device)
-
     # Text Encoder
     encoder_model = AutoModel.from_pretrained("bert-base-uncased")
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
     encoder = BatchedEncoder(model=encoder_model, tokenizer=tokenizer, device=args.device, max_length=36)
 
-    # Dataloaders
-    print("creating dataloaders")
-    train_all_dataloader = DataLoader(args.dataset_path, 'train_all', args.batch_size, args.max_rollout_length)
-    val_same_worlds_dataloader = DataLoader(args.dataset_path, 'val_same_worlds', args.batch_size, args.max_rollout_length)
-    test_same_worlds_se_dataloader = DataLoader(args.dataset_path, 'test_same_worlds-se', args.batch_size, args.max_rollout_length)
-    test_same_worlds_dataloader = DataLoader(args.dataset_path, 'test_same_worlds', args.batch_size, args.max_rollout_length)
-    print("finished creating dataloaders")
+    with open(args.dataset_path, "rb") as f:
+        dataset = pickle.load(f)
+
+    splits = list(dataset["rollouts"].keys())
+    train_split = None
+    for split in splits:
+        if "train" in split:
+            train_split = split 
+            break 
+    assert train_split is not None
+
+    train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", batch_size=args.batch_size)
+    # eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", batch_size=args.eval_batch_size)}
+
+    # # Dataloaders
+    # print("creating dataloaders")
+    # dataloaders = {split: DataLoader(dataset, split, "random" if split == train_split else "static", args.batch_size if split == train_split else args.eval_batch_size, args.max_rollout_length) for split in splits}
+    # print("finished creating dataloaders")
+
+    # # Analyzers
+    # analyzers = {split: {
+    #     "real": Analyzer(world_model if split == train_split else eval_world_model, f"{split}_real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device),
+    #     "imag": Analyzer(world_model if split == train_split else eval_world_model, f"{split}_imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device),
+    # } for split in splits}
 
     # training variables
     step = 0
     start_time = time.time()
 
-    grids, actions, manuals, ground_truths = train_all_dataloader.reset()
-    tensor_grids = torch.from_numpy(grids).long().to(args.device)
-    tensor_actions = torch.from_numpy(actions).long().to(args.device)
+    manuals, ground_truths, grids = train_dataloader.reset()
     manuals, tokens = encoder.encode(manuals)
+    tensor_grids = torch.from_numpy(grids).long().to(args.device)
     world_model.real_state_reset(tensor_grids)
     world_model.imag_state_reset(tensor_grids)
-
-    val_grids, val_actions, val_manuals, val_ground_truths = val_same_worlds_dataloader.reset()
-    val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
-    val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-    val_manuals, val_tokens = encoder.encode(val_manuals)
-    eval_world_model.real_state_reset(val_tensor_grids)
-    eval_world_model.imag_state_reset(val_tensor_grids)
 
     pbar = tqdm(total=args.max_step)
     while step < args.max_step: # main training loop
@@ -107,21 +95,21 @@ def train(args):
             args.world_model_val_freeze = False
 
         old_tensor_grids = tensor_grids
-        grids, actions, manuals, ground_truths, (new_idxs, cur_idxs), timesteps = train_all_dataloader.step()
-        tensor_grids = torch.from_numpy(grids).long().to(args.device)
-        tensor_actions = torch.from_numpy(actions).long().to(args.device)
-        tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
+        manuals, ground_truths, actions, grids, rewards, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
         manuals, tokens = encoder.encode(manuals)
+        tensor_actions = torch.from_numpy(actions).long().to(args.device)
+        tensor_grids = torch.from_numpy(grids).long().to(args.device)
+        tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
     
         # accumulate gradient
         if args.world_model_loss_source == "real":
-            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, cur_idxs)
+            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
             with torch.no_grad():
-                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, cur_idxs)
+                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
         elif args.world_model_loss_source == "imag":
-            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, cur_idxs)
+            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
             with torch.no_grad():
-                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, cur_idxs)
+                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, cur_idxs)
         else:
             raise NotImplementedError
         step += 1    
@@ -136,8 +124,6 @@ def train(args):
             imag_loss = world_model.imag_loss_reset()
             world_model.real_state_detach()
             world_model.imag_state_detach()
-
-            eval_world_model.load_state_dict(world_model.state_dict())
             
             updatelog = {
                 "step": step,
@@ -152,51 +138,50 @@ def train(args):
         world_model.real_state_reset(tensor_grids, new_idxs)
         world_model.imag_state_reset(tensor_grids, new_idxs)
 
-        # push results to analyzers and run eval
-        if step % args.eval_step > (args.eval_step - args.eval_length):
-            train_all_real_analyzer.push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.real_entity_ids, tensor_timesteps)
-            train_all_imag_analyzer.push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.imag_entity_ids, tensor_timesteps)
+        # push results to train analyzers for eval
+        # if step % args.eval_step > (args.eval_step - args.eval_train_length):
+        #     analyzers[train_split]["real"].push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.real_entity_ids, tensor_timesteps)
+        #     analyzers[train_split]["imag"].push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.imag_entity_ids, tensor_timesteps)
 
-            # run eval
-            with torch.no_grad():
-                val_old_tensor_grids = val_tensor_grids
-                val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps = val_same_worlds_dataloader.step()
-                val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
-                val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-                val_tensor_timesteps = torch.from_numpy(val_timesteps).long().to(args.device)
-                val_manuals, val_tokens = encoder.encode(val_manuals)
+        # log results and run eval on other splits
+        # # run eval
+        #     with torch.no_grad():
+        #         val_old_tensor_grids = val_tensor_grids
+        #         val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps = val_same_worlds_dataloader.step()
+        #         val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
+        #         val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
+        #         val_tensor_timesteps = torch.from_numpy(val_timesteps).long().to(args.device)
+        #         val_manuals, val_tokens = encoder.encode(val_manuals)
             
-                val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-                val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+        #         val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
+        #         val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
 
-                # reset states if new rollouts started
-                eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
-                eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
+        #         # reset states if new rollouts started
+        #         eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
+        #         eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
 
-            val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.real_entity_ids, val_tensor_timesteps)
-            val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.imag_entity_ids, val_tensor_timesteps)
+        #     val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.real_entity_ids, val_tensor_timesteps)
+        #     val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.imag_entity_ids, val_tensor_timesteps)
+        # if step % args.eval_step == 0:
+        #     # val_real_loss = eval_world_model.real_loss_reset()
+        #     # val_imag_loss = eval_world_model.imag_loss_reset()
+        #     eval_log = {
+        #         "step": step,
+        #         # "val_real_loss": val_real_loss,
+        #         # "val_imag_loss": val_imag_loss,
+        #         # "val_real_loss_perplexity": np.exp(val_real_loss),
+        #         # "val_imag_loss_perplexity": np.exp(val_imag_loss),
+        #     }
+        #     eval_log.update(analyzers[train_split]["real"].getLog(step))
+        #     eval_log.update(analyzers[train_split["imag"]].getLog(step))
+        #     # eval_log.update(val_same_worlds_real_analyzer.getLog(step))
+        #     # eval_log.update(val_same_worlds_imag_analyzer.getLog(step))
+        #     wandb.log(eval_log)
 
-        # log results
-        if step % args.eval_step == 0:
-            val_real_loss = eval_world_model.real_loss_reset()
-            val_imag_loss = eval_world_model.imag_loss_reset()
-            eval_log = {
-                "step": step,
-                "val_real_loss": val_real_loss,
-                "val_imag_loss": val_imag_loss,
-                "val_real_loss_perplexity": np.exp(val_real_loss),
-                "val_imag_loss_perplexity": np.exp(val_imag_loss),
-            }
-            eval_log.update(train_all_real_analyzer.getLog(step))
-            eval_log.update(train_all_imag_analyzer.getLog(step))
-            eval_log.update(val_same_worlds_real_analyzer.getLog(step))
-            eval_log.update(val_same_worlds_imag_analyzer.getLog(step))
-            wandb.log(eval_log)
-
-            train_all_real_analyzer.reset()
-            train_all_imag_analyzer.reset()
-            val_same_worlds_real_analyzer.reset()
-            val_same_worlds_imag_analyzer.reset()
+        #     analyzers[train_split]["real"].reset()
+        #     analyzers[train_split["imag"]].reset()
+            # val_same_worlds_real_analyzer.reset()
+            # val_same_worlds_imag_analyzer.reset()
 
         pbar.update(1)
         # check if max_time has elapsed
@@ -218,7 +203,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_no_refine_pred_multilabel", dest="world_model_refine_pred_multilabel", action="store_false", help="Do not refine pred_multilabel.")
     parser.add_argument("--world_model_load_state", default=None, help="Path to world model state dict.")
     parser.add_argument("--world_model_key_dim", default=256, type=int, help="World model key embedding dimension.")
-    parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' key tokens.")
+    parser.add_argument("--world_model_key_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale", "chatgpt"], help="What to use to process the descriptors' key tokens.")
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
     parser.add_argument("--world_model_key_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze key module, -1 means never.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
@@ -228,12 +213,14 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_reward_loss_weight", default=1, type=float, help="World model reward loss weight.")
+    parser.add_argument("--world_model_done_loss_weight", default=1, type=float, help="World model done loss weight.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
     parser.add_argument("--world_model_prediction_type", default="location", choices=["existence", "class", "location"], help="What the model predicts.")
     parser.add_argument("--world_model_memory_type", default="lstm", choices=["mlp", "lstm"], help="NN type for memory module of world model.")
     
     # Dataset arguments
-    parser.add_argument("--dataset_path", default="datasets/stage_2_same_worlds_dataset.pickle", help="path to the dataset file")
+    parser.add_argument("--dataset_path", default="custom_dataset/dataset.pickle", help="path to the dataset file")
       
     # Training arguments
     parser.add_argument("--max_rollout_length", default=32, type=int, help="Max length of a rollout to train for")
@@ -244,7 +231,8 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
-    parser.add_argument('--eval_length', default=128, type=int, help='number of steps to run evaluation')
+    parser.add_argument('--eval_max_length', default=4096, type=int, help='max number of steps to run evaluation on splits')
+    parser.add_argument('--eval_batch_size', default=256, type=int, help='batch_size of unseen split input')
     parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
 
@@ -254,10 +242,10 @@ if __name__ == "__main__":
     if args.world_model_key_type == "oracle":
         args.world_model_key_dim = 17
     if args.world_model_val_type == "oracle":
-        args.world_model_val_dim = 4 # 3 entity mvmt types + avatar mvmt type
+        args.world_model_val_dim = 7 # avatar mvmt type + 3 entity mvmt types + 3 entity role types
 
-    assert args.eval_step >= args.eval_length
-    assert args.eval_length >= args.n_frames
+    assert args.eval_step % args.update_step == 0
+    assert args.eval_max_length >= args.n_frames
     
     # get hash of arguments minus seed
     args_dict = vars(args).copy()
@@ -277,7 +265,7 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.seed)
     
     wandb.init(
-        project = "iw_running",
+        project = "paper_running",
         entity = args.entity,
         group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_prediction_type}",
         name = str(int(time.time()))

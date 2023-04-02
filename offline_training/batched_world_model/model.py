@@ -8,7 +8,7 @@ from offline_training.batched_world_model.modules import BatchedEncoder, Batched
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 class BatchedWorldModel(nn.Module):
-    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, reward_loss_weight, done_loss_weight, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
         super().__init__()
 
         self.latent_size = latent_size 
@@ -114,6 +114,8 @@ class BatchedWorldModel(nn.Module):
         ).to(device)
         
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+        self.reward_loss_weight = reward_loss_weight
+        self.done_loss_weight = done_loss_weight
         self.real_loss_total = 0
         self.real_backprop_count = 0
         self.imag_loss_total = 0
