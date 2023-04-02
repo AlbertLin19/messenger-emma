@@ -25,7 +25,7 @@ COLORS = torch.tensor([
         [255, 0, 255], # 16 with_message
     ])
 
-class Analyzer:
+class Evaluator:
     def __init__(self, world_model, log_prefix, max_rollout_length, relevant_cls_idxs, n_frames, device):
         self.world_model = world_model
         self.log_prefix = log_prefix
