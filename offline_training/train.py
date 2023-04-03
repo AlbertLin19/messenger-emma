@@ -99,17 +99,19 @@ def train(args):
         manuals, tokens = encoder.encode(manuals)
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
+        tensor_rewards = torch.from_numpy(rewards).float().to(args.device)
+        tensor_dones = torch.from_numpy(dones).long().to(args.device)
         tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
     
         # accumulate gradient
         if args.world_model_loss_source == "real":
-            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
+            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
             with torch.no_grad():
-                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
+                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
         elif args.world_model_loss_source == "imag":
-            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
+            imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
             with torch.no_grad():
-                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, rewards, dones, cur_idxs)
+                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
         else:
             raise NotImplementedError
         step += 1    
@@ -120,17 +122,25 @@ def train(args):
                 world_model.real_loss_update()
             elif args.world_model_loss_source == "imag":
                 world_model.imag_loss_update()
-            real_loss = world_model.real_loss_reset()
-            imag_loss = world_model.imag_loss_reset()
+            real_grid_loss, real_reward_loss, real_done_loss, real_loss = world_model.real_loss_reset()
+            imag_grid_loss, imag_reward_loss, imag_done_loss, imag_loss = world_model.imag_loss_reset()
             world_model.real_state_detach()
             world_model.imag_state_detach()
             
             updatelog = {
                 "step": step,
+                "real_grid_loss": real_grid_loss,
+                "real_reward_loss": real_reward_loss,
+                "real_done_loss": real_done_loss,
                 "real_loss": real_loss,
+                "imag_grid_loss": imag_grid_loss,
+                "imag_reward_loss": imag_reward_loss,
+                "imag_done_loss": imag_done_loss,
                 "imag_loss": imag_loss,
-                "real_loss_perplexity": np.exp(real_loss),
-                "imag_loss_perplexity": np.exp(imag_loss),
+                "real_grid_loss_perplexity": np.exp(real_grid_loss),
+                "imag_grid_loss_perplexity": np.exp(imag_grid_loss),
+                "real_done_loss_perplexity": np.exp(real_done_loss),
+                "imag_done_loss_perplexity": np.exp(imag_done_loss),
             }
             wandb.log(updatelog)
 

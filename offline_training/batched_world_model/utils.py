@@ -8,6 +8,11 @@ MOVEMENT_TYPES = {
     "fleeing": 1,
     "immovable": 2,
 }
+ROLE_TYPES = {
+    "message": 3,
+    "goal": 4,
+    "enemy": 5,
+}
 
 def batched_convert_grid_to_multilabel(grids):
     multilabels = torch.sum(F.one_hot(grids, num_classes=17), dim=-2)
@@ -43,7 +48,8 @@ def batched_ground(manuals, ground_truths, world_model):
 def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world_model):
     if world_model.val_type == "oracle":
         # scale one_hot to cancel the subsequent averaging over descriptions
-        values = manuals.shape[1]*F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=4)
+        values = manuals.shape[1]*F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=world_model.val_dim)
+        values += manuals.shape[1]*F.one_hot(torch.tensor([[ROLE_TYPES[truth[2]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=world_model.val_dim)
     elif "emma" in world_model.val_type:
         values = world_model.txt_val(manuals)                                        # B x n_sent x sent_len x val_dim
         val_scales = world_model.scale_val(manuals)                                  # B x n_sent x sent_len x 1
