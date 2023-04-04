@@ -61,6 +61,15 @@ class Evaluator:
         self.nontrivial_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
         self.nontrivial_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
 
+        self.reward_mse = 0
+        self.reward_count = 0
+        self.nontrivial_reward_mse = 0
+        self.nontrivial_reward_count = 0
+        self.done_ln_perplexity = 0
+        self.done_count = 0
+        self.nontrivial_done_ln_perplexity = 0
+        self.nontrivial_done_count = 0
+
     def push(self, results, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
         preds, labels = results
         pred_locs, pred_rewards, pred_done_probs = preds
@@ -142,6 +151,18 @@ class Evaluator:
             self.nontrivial_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((entity_masks.unsqueeze(-1)*all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
             self.nontrivial_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=entity_masks[cur_idxs])
 
+            # accumulate reward_mse and nontrivial_reward_mse
+            self.reward_mse += torch.sum(torch.pow((pred_rewards - true_rewards)[cur_idxs], 2)).item()
+            self.reward_count += len(cur_idxs)
+            self.nontrivial_reward_mse += torch.sum(torch.pow(((pred_rewards - true_rewards)*(true_rewards != 0))[cur_idxs], 2)).item()
+            self.nontrivial_reward_count += torch.sum((true_rewards != 0)[cur_idxs]).item()
+            
+            # accumulate done_ln_perplexity and nontrivial_done_ln_perplexity
+            self.done_ln_perplexity += F.binary_cross_entropy(pred_done_probs[cur_idxs], true_done_probs[cur_idxs], reduction='sum').item()
+            self.done_count += len(cur_idxs)
+            self.nontrivial_done_ln_perplexity += F.binary_cross_entropy(pred_done_probs[cur_idxs], true_done_probs[cur_idxs], weight=(true_rewards != 0)[cur_idxs], reduction='sum').item()
+            self.nontrivial_done_count += torch.sum((true_rewards != 0)[cur_idxs]).item()
+
     def getLog(self, step):
         log = {}
 
@@ -222,6 +243,14 @@ class Evaluator:
             nontrivial_perplexities = np.exp((self.nontrivial_ln_perplexities / self.nontrivial_ln_perplexity_counts).cpu().numpy())
             log.update({f'perplexity_{j}_t={i}': perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
             log.update({f'nontrivial_perplexity_{j}_t={i}': nontrivial_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
+
+            # log reward_mse
+            log.update({f'reward_mse': self.reward_mse / self.reward_count})
+            log.update({f'nontrivial_reward_mse': self.nontrivial_reward_mse / self.nontrivial_reward_count})
+
+            # log done_perplexity
+            log.update({f'done_perplexity': np.exp(self.done_ln_perplexity / self.done_count)})
+            log.update({f'nontrivial_done_perplexity': np.exp(self.nontrivial_done_ln_perplexity / self.nontrivial_done_count)})
                         
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)
