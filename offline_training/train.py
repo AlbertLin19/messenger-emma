@@ -62,12 +62,7 @@ def train(args):
     assert train_split is not None
 
     train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", batch_size=args.batch_size)
-    # eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", batch_size=args.eval_batch_size)}
-
-    # # Dataloaders
-    # print("creating dataloaders")
-    # dataloaders = {split: DataLoader(dataset, split, "random" if split == train_split else "static", args.batch_size if split == train_split else args.eval_batch_size, args.max_rollout_length) for split in splits}
-    # print("finished creating dataloaders")
+    eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", batch_size=args.eval_batch_size) for split in splits}
 
     # # Analyzers
     # analyzers = {split: {
@@ -147,6 +142,75 @@ def train(args):
         # reset states if new rollouts started
         world_model.real_state_reset(tensor_grids, new_idxs)
         world_model.imag_state_reset(tensor_grids, new_idxs)
+
+        if step % args.eval_step == 0:
+            with torch.no_grad():
+                eval_updatelog = {"step": step}
+                for eval_split, eval_dataloader in eval_dataloaders.items():
+                    eval_world_model = BatchedWorldModel(
+                        key_type=args.world_model_key_type,
+                        key_dim=args.world_model_key_dim,
+                        val_type=args.world_model_val_type,
+                        val_dim=args.world_model_val_dim,
+                        memory_type=args.world_model_memory_type,
+                        latent_size=args.world_model_latent_size,
+                        hidden_size=args.world_model_hidden_size,
+                        batch_size=args.eval_batch_size,
+                        learning_rate=args.world_model_learning_rate,
+                        reward_loss_weight=args.world_model_reward_loss_weight,
+                        done_loss_weight=args.world_model_done_loss_weight,
+                        prediction_type=args.world_model_prediction_type,
+                        pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
+                        refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+                        device=args.device
+                    )
+                    eval_world_model.load_state_dict(world_model.state_dict())
+                
+                    eval_manuals, eval_ground_truths, eval_grids, eval_n_rollouts = eval_dataloader.reset()
+                    eval_manuals, eval_tokens = encoder.encode(eval_manuals)
+                    eval_tensor_grids = torch.from_numpy(eval_grids).long().to(args.device)
+                    eval_world_model.real_state_reset(eval_tensor_grids)
+                    eval_world_model.imag_state_reset(eval_tensor_grids)
+
+                    eval_pbar = tqdm(total=eval_n_rollouts)
+                    eval_complete = False 
+                    while not eval_complete:
+                        eval_old_tensor_grids = eval_tensor_grids
+                        eval_manuals, eval_ground_truths, eval_actions, eval_grids, eval_rewards, eval_dones, (eval_new_idxs, eval_cur_idxs), eval_timesteps, eval_complete = eval_dataloader.step()
+                        eval_manuals, eval_tokens = encoder.encode(eval_manuals)
+                        eval_tensor_actions = torch.from_numpy(eval_actions).long().to(args.device)
+                        eval_tensor_grids = torch.from_numpy(eval_grids).long().to(args.device)
+                        eval_tensor_rewards = torch.from_numpy(eval_rewards).float().to(args.device)
+                        eval_tensor_dones = torch.from_numpy(eval_dones).long().to(args.device)
+                        eval_tensor_timesteps = torch.from_numpy(eval_timesteps).long().to(args.device)
+                    
+                        eval_real_results = eval_world_model.real_step(eval_old_tensor_grids, eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
+                        eval_imag_results = eval_world_model.imag_step(eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
+
+                        eval_world_model.real_state_reset(eval_tensor_grids, eval_new_idxs)
+                        eval_world_model.imag_state_reset(eval_tensor_grids, eval_new_idxs)
+
+                        eval_pbar.update(int(eval_dones.sum().item()))
+
+                    eval_real_grid_loss, eval_real_reward_loss, eval_real_done_loss, eval_real_loss = eval_world_model.real_loss_reset()
+                    eval_imag_grid_loss, eval_imag_reward_loss, eval_imag_done_loss, eval_imag_loss = eval_world_model.imag_loss_reset()
+                    
+                    eval_updatelog.update({
+                        f"eval_{eval_split}_real_grid_loss": eval_real_grid_loss,
+                        f"eval_{eval_split}_real_reward_loss": eval_real_reward_loss,
+                        f"eval_{eval_split}_real_done_loss": eval_real_done_loss,
+                        f"eval_{eval_split}_real_loss": eval_real_loss,
+                        f"eval_{eval_split}_imag_grid_loss": eval_imag_grid_loss,
+                        f"eval_{eval_split}_imag_reward_loss": eval_imag_reward_loss,
+                        f"eval_{eval_split}_imag_done_loss": eval_imag_done_loss,
+                        f"eval_{eval_split}_imag_loss": eval_imag_loss,
+                        f"eval_{eval_split}_real_grid_loss_perplexity": np.exp(eval_real_grid_loss),
+                        f"eval_{eval_split}_imag_grid_loss_perplexity": np.exp(eval_imag_grid_loss),
+                        f"eval_{eval_split}_real_done_loss_perplexity": np.exp(eval_real_done_loss),
+                        f"eval_{eval_split}_imag_done_loss_perplexity": np.exp(eval_imag_done_loss),
+                    })
+                wandb.log(eval_updatelog)
+
 
         # push results to train analyzers for eval
         # if step % args.eval_step > (args.eval_step - args.eval_train_length):
@@ -241,8 +305,7 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
-    parser.add_argument('--eval_max_length', default=4096, type=int, help='max number of steps to run evaluation on splits')
-    parser.add_argument('--eval_batch_size', default=256, type=int, help='batch_size of unseen split input')
+    parser.add_argument('--eval_batch_size', default=256, type=int, help='batch_size for evaluation')
     parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
 
@@ -257,7 +320,6 @@ if __name__ == "__main__":
         args.world_model_val_dim = 0 # none
 
     assert args.eval_step % args.update_step == 0
-    assert args.eval_max_length >= args.n_frames
     
     # get hash of arguments minus seed
     args_dict = vars(args).copy()

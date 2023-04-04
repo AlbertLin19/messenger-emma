@@ -73,27 +73,66 @@ class DataLoader:
             self.indices = np.random.choice(self.n_rollouts, size=self.batch_size, p=self.rollout_probs)
             # randomly sample starting state for each rollout
             self.timesteps = (np.random.rand(self.batch_size)*(self.rollout_lengths[self.indices] - 1)).astype(int)
+            return self.manuals_array[self.indices], self.ground_truths_array[self.indices], self.grid_sequences_array[self.indices, self.timesteps]
+        elif self.mode == "static":
+            # keep track of available rollout indices
+            self.avail_indices = np.arange(self.n_rollouts, dtype=int)
+            # take initial set of rollouts
+            self.indices = -1*np.ones((self.batch_size), dtype=int)
+            if self.batch_size < len(self.avail_indices):
+                self.indices[:self.batch_size] = self.avail_indices[:self.batch_size]
+                self.avail_indices = self.avail_indices[self.batch_size:]
+            else:
+                self.indices[:len(self.avail_indices)] = self.avail_indices
+                self.avail_indices = None
+            # start at initial state for each rollout
+            self.timesteps = np.zeros((self.batch_size), dtype=int)
+            nonnegative_indices = self.indices + (self.indices < 0)
+            return self.manuals_array[nonnegative_indices], self.ground_truths_array[nonnegative_indices], self.grid_sequences_array[nonnegative_indices, self.timesteps], self.n_rollouts
         else:
             raise NotImplementedError
-        return self.manuals_array[self.indices], self.ground_truths_array[self.indices], self.grid_sequences_array[self.indices, self.timesteps]
 
     def step(self):
-        self.timesteps += 1
-        new_idxs = np.argwhere(self.timesteps >= self.rollout_lengths[self.indices]).squeeze(-1)
-        cur_idxs = np.argwhere(self.timesteps < self.rollout_lengths[self.indices]).squeeze(-1)
         if self.mode == "random":
+            self.timesteps += 1
+            new_idxs = np.argwhere(self.timesteps >= self.rollout_lengths[self.indices]).squeeze(-1)
+            cur_idxs = np.argwhere(self.timesteps < self.rollout_lengths[self.indices]).squeeze(-1)
             self.indices[new_idxs] = np.random.choice(self.n_rollouts, size=len(new_idxs), p=self.rollout_probs)
             self.timesteps[new_idxs] = (np.random.rand(len(new_idxs))*(self.rollout_lengths[self.indices[new_idxs]] - 1)).astype(int)
+            return (
+                self.manuals_array[self.indices], 
+                self.ground_truths_array[self.indices], 
+                self.action_sequences_array[self.indices, self.timesteps], 
+                self.grid_sequences_array[self.indices, self.timesteps], 
+                self.reward_sequences_array[self.indices, self.timesteps], 
+                self.timesteps == (self.rollout_lengths[self.indices]-1),
+                (new_idxs, cur_idxs), 
+                self.timesteps,
+            )
+        elif self.mode == "static":
+            self.timesteps += (self.indices >= 0)
+            nonnegative_indices = self.indices + (self.indices < 0)
+            new_idxs = np.argwhere((self.indices >= 0)*(self.timesteps >= self.rollout_lengths[nonnegative_indices])).squeeze(-1)
+            cur_idxs = np.argwhere((self.indices >= 0)*(self.timesteps < self.rollout_lengths[nonnegative_indices])).squeeze(-1)
+            self.indices[new_idxs] = -1
+            self.timesteps[new_idxs] = 0
+            if self.avail_indices is not None:
+                if len(new_idxs) < len(self.avail_indices):
+                    self.indices[new_idxs] = self.avail_indices[:len(new_idxs)]
+                    self.avail_indices = self.avail_indices[len(new_idxs):]
+                else:
+                    self.indices[new_idxs[:len(self.avail_indices)]] = self.avail_indices
+                    self.avail_indices = None
+            return (
+                self.manuals_array[nonnegative_indices], 
+                self.ground_truths_array[nonnegative_indices], 
+                self.action_sequences_array[nonnegative_indices, self.timesteps], 
+                self.grid_sequences_array[nonnegative_indices, self.timesteps], 
+                self.reward_sequences_array[nonnegative_indices, self.timesteps], 
+                (self.indices >= 0)*(self.timesteps == (self.rollout_lengths[nonnegative_indices]-1)),
+                (new_idxs, cur_idxs), 
+                self.timesteps,
+                self.avail_indices is None,
+            )
         else:
             raise NotImplementedError
-
-        return (
-            self.manuals_array[self.indices], 
-            self.ground_truths_array[self.indices], 
-            self.action_sequences_array[self.indices, self.timesteps], 
-            self.grid_sequences_array[self.indices, self.timesteps], 
-            self.reward_sequences_array[self.indices, self.timesteps], 
-            self.timesteps == (self.rollout_lengths[self.indices]-1),
-            (new_idxs, cur_idxs), 
-            self.timesteps
-        )
