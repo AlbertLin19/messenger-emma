@@ -61,8 +61,13 @@ class Evaluator:
         self.nontrivial_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
         self.nontrivial_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
 
-    def push(self, pred_probs_tuple, pred_multilabels, true_probs, true_multilabels, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
+    def push(self, results, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
+        preds, labels = results
+        pred_locs, pred_rewards, pred_done_probs = preds
+        pred_probs_tuple, pred_multilabels = pred_locs
         pred_probs, pred_nonexistence_probs = pred_probs_tuple
+        true_locs, true_rewards, true_done_probs = labels
+        true_probs, true_multilabels = true_locs
         manuals, tokens = descriptors_tuple
         new_idxs, cur_idxs = idxs_tuple
 

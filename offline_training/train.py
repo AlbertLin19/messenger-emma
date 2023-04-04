@@ -184,6 +184,9 @@ def train(args):
                         eval_real_results = eval_world_model.real_step(eval_old_tensor_grids, eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
                         eval_imag_results = eval_world_model.imag_step(eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
 
+                        eval_real_evaluator.push(eval_real_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.real_entity_ids, eval_tensor_timesteps)
+                        eval_imag_evaluator.push(eval_imag_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.imag_entity_ids, eval_tensor_timesteps)
+
                         eval_world_model.real_state_reset(eval_tensor_grids, eval_new_idxs)
                         eval_world_model.imag_state_reset(eval_tensor_grids, eval_new_idxs)
 
