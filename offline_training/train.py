@@ -170,10 +170,11 @@ def train(args):
                     eval_world_model.imag_state_reset(eval_tensor_grids)
 
                     eval_pbar = tqdm(total=eval_n_rollouts)
-                    eval_complete = False 
-                    while not eval_complete:
+                    while True:
                         eval_old_tensor_grids = eval_tensor_grids
                         eval_manuals, eval_ground_truths, eval_actions, eval_grids, eval_rewards, eval_dones, (eval_new_idxs, eval_cur_idxs), eval_timesteps, eval_complete = eval_dataloader.step()
+                        if eval_complete:
+                            break
                         eval_manuals, eval_tokens = encoder.encode(eval_manuals)
                         eval_tensor_actions = torch.from_numpy(eval_actions).long().to(args.device)
                         eval_tensor_grids = torch.from_numpy(eval_grids).long().to(args.device)

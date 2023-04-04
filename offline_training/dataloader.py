@@ -121,8 +121,10 @@ class DataLoader:
                     self.indices[new_idxs] = self.avail_indices[:len(new_idxs)]
                     self.avail_indices = self.avail_indices[len(new_idxs):]
                 else:
-                    self.indices[new_idxs[:len(self.avail_indices)]] = self.avail_indices
+                    new_idxs = new_idxs[:len(self.avail_indices)]
+                    self.indices[new_idxs] = self.avail_indices
                     self.avail_indices = None
+            nonnegative_indices = self.indices + (self.indices < 0)
             return (
                 self.manuals_array[nonnegative_indices], 
                 self.ground_truths_array[nonnegative_indices], 
