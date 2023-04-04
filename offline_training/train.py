@@ -193,9 +193,10 @@ def train(args):
 
                         eval_pbar.update(int(eval_dones.sum().item()))
 
+                    eval_updatelog.update(eval_real_evaluator.getLog(step))
+                    eval_updatelog.update(eval_imag_evaluator.getLog(step))
                     eval_real_grid_loss, eval_real_reward_loss, eval_real_done_loss, eval_real_loss = eval_world_model.real_loss_reset()
                     eval_imag_grid_loss, eval_imag_reward_loss, eval_imag_done_loss, eval_imag_loss = eval_world_model.imag_loss_reset()
-                    
                     eval_updatelog.update({
                         f"eval_{eval_split}_real_grid_loss": eval_real_grid_loss,
                         f"eval_{eval_split}_real_reward_loss": eval_real_reward_loss,
@@ -211,52 +212,6 @@ def train(args):
                         f"eval_{eval_split}_imag_done_loss_perplexity": np.exp(eval_imag_done_loss),
                     })
                 wandb.log(eval_updatelog)
-
-
-        # push results to train analyzers for eval
-        # if step % args.eval_step > (args.eval_step - args.eval_train_length):
-        #     analyzers[train_split]["real"].push(*real_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.real_entity_ids, tensor_timesteps)
-        #     analyzers[train_split]["imag"].push(*imag_results, (manuals, tokens), ground_truths, (new_idxs, cur_idxs), world_model.imag_entity_ids, tensor_timesteps)
-
-        # log results and run eval on other splits
-        # # run eval
-        #     with torch.no_grad():
-        #         val_old_tensor_grids = val_tensor_grids
-        #         val_grids, val_actions, val_manuals, val_ground_truths, (val_new_idxs, val_cur_idxs), val_timesteps = val_same_worlds_dataloader.step()
-        #         val_tensor_grids = torch.from_numpy(val_grids).long().to(args.device)
-        #         val_tensor_actions = torch.from_numpy(val_actions).long().to(args.device)
-        #         val_tensor_timesteps = torch.from_numpy(val_timesteps).long().to(args.device)
-        #         val_manuals, val_tokens = encoder.encode(val_manuals)
-            
-        #         val_real_results = eval_world_model.real_step(val_old_tensor_grids, val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-        #         val_imag_results = eval_world_model.imag_step(val_manuals, val_ground_truths, val_tensor_actions, val_tensor_grids, val_cur_idxs)
-
-        #         # reset states if new rollouts started
-        #         eval_world_model.real_state_reset(val_tensor_grids, val_new_idxs)
-        #         eval_world_model.imag_state_reset(val_tensor_grids, val_new_idxs)
-
-        #     val_same_worlds_real_analyzer.push(*val_real_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.real_entity_ids, val_tensor_timesteps)
-        #     val_same_worlds_imag_analyzer.push(*val_imag_results, (val_manuals, val_tokens), val_ground_truths, (val_new_idxs, val_cur_idxs), eval_world_model.imag_entity_ids, val_tensor_timesteps)
-        # if step % args.eval_step == 0:
-        #     # val_real_loss = eval_world_model.real_loss_reset()
-        #     # val_imag_loss = eval_world_model.imag_loss_reset()
-        #     eval_log = {
-        #         "step": step,
-        #         # "val_real_loss": val_real_loss,
-        #         # "val_imag_loss": val_imag_loss,
-        #         # "val_real_loss_perplexity": np.exp(val_real_loss),
-        #         # "val_imag_loss_perplexity": np.exp(val_imag_loss),
-        #     }
-        #     eval_log.update(analyzers[train_split]["real"].getLog(step))
-        #     eval_log.update(analyzers[train_split["imag"]].getLog(step))
-        #     # eval_log.update(val_same_worlds_real_analyzer.getLog(step))
-        #     # eval_log.update(val_same_worlds_imag_analyzer.getLog(step))
-        #     wandb.log(eval_log)
-
-        #     analyzers[train_split]["real"].reset()
-        #     analyzers[train_split["imag"]].reset()
-            # val_same_worlds_real_analyzer.reset()
-            # val_same_worlds_imag_analyzer.reset()
 
         pbar.update(1)
         # check if max_time has elapsed
@@ -306,7 +261,7 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
-    parser.add_argument('--eval_batch_size', default=256, type=int, help='batch_size for evaluation')
+    parser.add_argument('--eval_batch_size', default=2048, type=int, help='batch_size for evaluation')
     parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
 
