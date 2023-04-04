@@ -217,7 +217,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_key_freeze", default=False, action="store_true", help="Whether to freeze key module.")
     parser.add_argument("--world_model_key_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze key module, -1 means never.")
     parser.add_argument("--world_model_val_dim", default=256, type=int, help="World model value embedding dimension.")
-    parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale"], help="What to use to process the descriptors' value tokens.")
+    parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale", "chatgpt", "none"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_val_freeze", default=False, action="store_true", help="Whether to freeze val module.")
     parser.add_argument("--world_model_val_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze val module, -1 means never.")
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
@@ -253,6 +253,8 @@ if __name__ == "__main__":
         args.world_model_key_dim = 17
     if args.world_model_val_type == "oracle":
         args.world_model_val_dim = 7 # avatar mvmt type + 3 entity mvmt types + 3 entity role types
+    elif args.world_model_val_type == "none":
+        args.world_model_val_dim = 0 # none
 
     assert args.eval_step % args.update_step == 0
     assert args.eval_max_length >= args.n_frames

@@ -55,6 +55,8 @@ def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world
         val_scales = world_model.scale_val(manuals)                                  # B x n_sent x sent_len x 1
         values = values * val_scales                                                 # B x n_sent x sent_len x val_dim
         values = torch.sum(values, dim=-2)                                           # B x n_sent x val_dim
+    elif world_model.val_type == "none":
+        return multilabels[..., world_model.relevant_cls_idxs].float()
     else:
         raise NotImplementedError
 

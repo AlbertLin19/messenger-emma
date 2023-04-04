@@ -72,6 +72,9 @@ class BatchedWorldModel(nn.Module):
                 nn.Softmax(dim=-2)
             ).to(device)
             
+        elif val_type == "none":
+            pass
+        
         else:
             raise NotImplementedError
 
