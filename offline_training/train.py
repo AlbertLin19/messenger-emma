@@ -64,12 +64,6 @@ def train(args):
     train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", batch_size=args.batch_size)
     eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", batch_size=args.eval_batch_size) for split in splits}
 
-    # # Analyzers
-    # analyzers = {split: {
-    #     "real": Analyzer(world_model if split == train_split else eval_world_model, f"{split}_real_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device),
-    #     "imag": Analyzer(world_model if split == train_split else eval_world_model, f"{split}_imag_", args.max_rollout_length, world_model.relevant_cls_idxs, args.n_frames, args.device),
-    # } for split in splits}
-
     # training variables
     step = 0
     start_time = time.time()
@@ -165,6 +159,9 @@ def train(args):
                         device=args.device
                     )
                     eval_world_model.load_state_dict(world_model.state_dict())
+
+                    eval_real_evaluator = Evaluator(eval_world_model, f"eval_{split}_real_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
+                    eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
                 
                     eval_manuals, eval_ground_truths, eval_grids, eval_n_rollouts = eval_dataloader.reset()
                     eval_manuals, eval_tokens = encoder.encode(eval_manuals)

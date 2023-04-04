@@ -132,7 +132,7 @@ class DataLoader:
                 (self.indices >= 0)*(self.timesteps == (self.rollout_lengths[nonnegative_indices]-1)),
                 (new_idxs, cur_idxs), 
                 self.timesteps,
-                self.avail_indices is None,
+                (self.indices < 0).all(),
             )
         else:
             raise NotImplementedError
