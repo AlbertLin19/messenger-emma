@@ -160,8 +160,8 @@ def train(args):
                     )
                     eval_world_model.load_state_dict(world_model.state_dict())
 
-                    eval_real_evaluator = Evaluator(eval_world_model, f"eval_{split}_real_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
-                    eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
+                    eval_real_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_real_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
+                    eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
                 
                     eval_manuals, eval_ground_truths, eval_grids, eval_n_rollouts = eval_dataloader.reset()
                     eval_manuals, eval_tokens = encoder.encode(eval_manuals)
