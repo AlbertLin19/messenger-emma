@@ -32,6 +32,9 @@ Collect rollouts of custom games of Stage 2 using a random policy and store into
             'reward_sequences': [
                 [0, reward1, reward2, ...],
             ],
+            'done_sequences': [
+                [False, False, False, ...],
+            ],
         },
     }
 }
@@ -86,6 +89,7 @@ for split, games in splits.items():
     grid_sequences = []
     action_sequences = []
     reward_sequences = []
+    done_sequences = []
 
     for i in tqdm(range(len(games))):
         for _ in range(NUM_REPEATS):
@@ -99,6 +103,7 @@ for split, games in splits.items():
             grid_sequence = [obs]
             action_sequence = [0]
             reward_sequence = [0]
+            done_sequence = [False]
 
             done = False
             step = 1
@@ -112,16 +117,19 @@ for split, games in splits.items():
                 grid_sequence.append(obs)
                 action_sequence.append(action)
                 reward_sequence.append(reward)
+                done_sequence.append(done)
 
             grid_sequences.append(grid_sequence)
             action_sequences.append(action_sequence)
             reward_sequences.append(reward_sequence)
+            done_sequences.append(done_sequence)
     dataset["rollouts"][split] = {
         "manual_idxs": manual_idxs,
         "ground_truth_idxs": ground_truth_idxs,
         "grid_sequences": grid_sequences,
         "action_sequences": action_sequences,
         "reward_sequences": reward_sequences,
+        "done_sequences": done_sequences,
     }
 
 with open(SAVE_PATH, 'wb') as f:

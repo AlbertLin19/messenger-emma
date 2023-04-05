@@ -172,8 +172,8 @@ def train(args):
                     eval_pbar = tqdm(total=eval_n_rollouts)
                     while True:
                         eval_old_tensor_grids = eval_tensor_grids
-                        eval_manuals, eval_ground_truths, eval_actions, eval_grids, eval_rewards, eval_dones, (eval_new_idxs, eval_cur_idxs), eval_timesteps, eval_complete = eval_dataloader.step()
-                        if eval_complete:
+                        eval_manuals, eval_ground_truths, eval_actions, eval_grids, eval_rewards, eval_dones, (eval_new_idxs, eval_cur_idxs), eval_timesteps, eval_just_completes, eval_all_complete = eval_dataloader.step()
+                        if eval_all_complete:
                             break
                         eval_manuals, eval_tokens = encoder.encode(eval_manuals)
                         eval_tensor_actions = torch.from_numpy(eval_actions).long().to(args.device)
@@ -191,7 +191,7 @@ def train(args):
                         eval_world_model.real_state_reset(eval_tensor_grids, eval_new_idxs)
                         eval_world_model.imag_state_reset(eval_tensor_grids, eval_new_idxs)
 
-                        eval_pbar.update(int(eval_dones.sum().item()))
+                        eval_pbar.update(int(eval_just_completes.sum().item()))
 
                     eval_updatelog.update(eval_real_evaluator.getLog(step))
                     eval_updatelog.update(eval_imag_evaluator.getLog(step))

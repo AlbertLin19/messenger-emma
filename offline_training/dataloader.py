@@ -54,12 +54,14 @@ class DataLoader:
         self.ground_truths_array = np.zeros((self.n_rollouts), dtype=object)
         self.action_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=int)
         self.reward_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=float)
+        self.done_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=bool)
         self.grid_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths), 10, 10, 4), dtype=int)
         for i in tqdm(range(self.n_rollouts)):
             self.manuals_array[i] = get_manual(dataset, split, i)
             self.ground_truths_array[i] = get_ground_truth(dataset, split, i)
             self.action_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["action_sequences"][i][:max_rollout_length]
             self.reward_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["reward_sequences"][i][:max_rollout_length]
+            self.done_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["done_sequences"][i][:max_rollout_length]
             self.grid_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["grid_sequences"][i][:max_rollout_length]
         print("n_rollouts:", self.n_rollouts, "; max_rollout_length:", np.max(self.rollout_lengths))
 
@@ -105,7 +107,7 @@ class DataLoader:
                 self.action_sequences_array[self.indices, self.timesteps], 
                 self.grid_sequences_array[self.indices, self.timesteps], 
                 self.reward_sequences_array[self.indices, self.timesteps], 
-                self.timesteps == (self.rollout_lengths[self.indices]-1),
+                self.done_sequences_array[self.indices, self.timesteps],
                 (new_idxs, cur_idxs), 
                 self.timesteps,
             )
@@ -131,10 +133,11 @@ class DataLoader:
                 self.action_sequences_array[nonnegative_indices, self.timesteps], 
                 self.grid_sequences_array[nonnegative_indices, self.timesteps], 
                 self.reward_sequences_array[nonnegative_indices, self.timesteps], 
-                (self.indices >= 0)*(self.timesteps == (self.rollout_lengths[nonnegative_indices]-1)),
+                self.done_sequences_array[nonnegative_indices, self.timesteps],
                 (new_idxs, cur_idxs), 
                 self.timesteps,
-                (self.indices < 0).all(),
+                (self.indices >= 0)*(self.timesteps == (self.rollout_lengths[nonnegative_indices]-1)), # whether rollout was just completed
+                (self.indices < 0).all(), # whether all rollouts have been completed
             )
         else:
             raise NotImplementedError
