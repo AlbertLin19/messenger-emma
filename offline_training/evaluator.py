@@ -180,9 +180,9 @@ class Evaluator:
                         
                 timestep = np.arange(self.max_rollout_length)
                 log.update({
-                    f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall.cpu().numpy()), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
-                    f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision.cpu().numpy()), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
-                    f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1.cpu().numpy()), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
+                    # f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall.cpu().numpy()), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
+                    # f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision.cpu().numpy()), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
+                    # f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1.cpu().numpy()), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
                     f'recall_{log_suffix}_avg': recall.nanmean(),
                     f'precision_{log_suffix}_avg': precision.nanmean(),
                     f'f1_{log_suffix}_avg': f1.nanmean(),

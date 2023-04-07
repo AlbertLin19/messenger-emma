@@ -261,9 +261,10 @@ if __name__ == "__main__":
 
     # Logging arguments
     parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
-    parser.add_argument('--eval_batch_size', default=2048, type=int, help='batch_size for evaluation')
+    parser.add_argument('--eval_batch_size', default=1024, type=int, help='batch_size for evaluation')
     parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
+    parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
 
     args = parser.parse_args()
     if args.output is None:
@@ -298,7 +299,8 @@ if __name__ == "__main__":
         project = "paper_running",
         entity = args.entity,
         group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_prediction_type}",
-        name = str(int(time.time()))
+        name = str(int(time.time())),
+        mode = args.mode,
     )
     wandb.config.update(args)
     
