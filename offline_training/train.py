@@ -61,8 +61,8 @@ def train(args):
             break 
     assert train_split is not None
 
-    train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", batch_size=args.batch_size)
-    eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", batch_size=args.eval_batch_size) for split in splits}
+    train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", start_state=args.train_start_state, batch_size=args.batch_size)
+    eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", start_state="initial", batch_size=args.eval_batch_size) for split in splits}
 
     # training variables
     step = 0
@@ -253,6 +253,7 @@ if __name__ == "__main__":
     parser.add_argument("--dataset_path", default="custom_dataset/dataset.pickle", help="path to the dataset file")
       
     # Training arguments
+    parser.add_argument("--train_start_state", default="initial", choices=["initial", "anywhere"], help="Which state that rollouts should start from during training")
     parser.add_argument("--max_rollout_length", default=32, type=int, help="Max length of a rollout to train for")
     parser.add_argument("--update_step", default=32, type=int, help="Number of steps before model update")
     parser.add_argument("--batch_size", default=64, type=int, help="batch_size of training input")

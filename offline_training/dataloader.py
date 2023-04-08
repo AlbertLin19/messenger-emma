@@ -45,7 +45,7 @@ def get_ground_truth(dataset, split, i):
 # takes in custom dataset (which has its own custom keywords) 
 # and outputs in terms of Messenger keywords
 class DataLoader:
-    def __init__(self, dataset, split, max_rollout_length, mode, batch_size):
+    def __init__(self, dataset, split, max_rollout_length, mode, start_state, batch_size):
         self.n_rollouts = len(dataset["rollouts"][split]["manual_idxs"])
         self.rollout_lengths = np.array([min(len(sequence), max_rollout_length) for sequence in dataset["rollouts"][split]["grid_sequences"]])
         self.rollout_probs = (self.rollout_lengths-1)/np.sum(self.rollout_lengths-1)
@@ -67,14 +67,22 @@ class DataLoader:
 
         self.mode = mode 
         assert mode in ["random", "static"]
+        self.start_state = start_state
+        assert start_state in ["initial", "anywhere"]
         self.batch_size = batch_size
     
     def reset(self):
         if self.mode == "random":
             # randomly sample batch_size rollouts from data (with probability proportional to their lengths) and keep track of their lengths
             self.indices = np.random.choice(self.n_rollouts, size=self.batch_size, p=self.rollout_probs)
-            # randomly sample starting state for each rollout
-            self.timesteps = (np.random.rand(self.batch_size)*(self.rollout_lengths[self.indices] - 1)).astype(int)
+            if self.start_state == "initial":
+                # start at initial state for each rollout
+                self.timesteps = np.zeros((self.batch_size), dtype=int)
+            elif self.start_state == "anywhere":
+                # randomly sample starting state for each rollout
+                self.timesteps = (np.random.rand(self.batch_size)*(self.rollout_lengths[self.indices] - 1)).astype(int)
+            else:
+                raise NotImplementedError
             return self.manuals_array[self.indices], self.ground_truths_array[self.indices], self.grid_sequences_array[self.indices, self.timesteps]
         elif self.mode == "static":
             # keep track of available rollout indices
@@ -87,8 +95,11 @@ class DataLoader:
             else:
                 self.indices[:len(self.avail_indices)] = self.avail_indices
                 self.avail_indices = None
-            # start at initial state for each rollout
-            self.timesteps = np.zeros((self.batch_size), dtype=int)
+            if self.start_state == "initial":
+                # start at initial state for each rollout
+                self.timesteps = np.zeros((self.batch_size), dtype=int)
+            else:
+                raise NotImplementedError
             nonnegative_indices = self.indices + (self.indices < 0)
             return self.manuals_array[nonnegative_indices], self.ground_truths_array[nonnegative_indices], self.grid_sequences_array[nonnegative_indices, self.timesteps], self.n_rollouts
         else:
@@ -100,7 +111,13 @@ class DataLoader:
             new_idxs = np.argwhere(self.timesteps >= self.rollout_lengths[self.indices]).squeeze(-1)
             cur_idxs = np.argwhere(self.timesteps < self.rollout_lengths[self.indices]).squeeze(-1)
             self.indices[new_idxs] = np.random.choice(self.n_rollouts, size=len(new_idxs), p=self.rollout_probs)
-            self.timesteps[new_idxs] = (np.random.rand(len(new_idxs))*(self.rollout_lengths[self.indices[new_idxs]] - 1)).astype(int)
+            if self.start_state == "initial":
+                # start at initial state for each rollout
+                self.timesteps[new_idxs] = 0
+            elif self.start_state == "anywhere":
+                self.timesteps[new_idxs] = (np.random.rand(len(new_idxs))*(self.rollout_lengths[self.indices[new_idxs]] - 1)).astype(int)
+            else:
+                raise NotImplementedError
             return (
                 self.manuals_array[self.indices], 
                 self.ground_truths_array[self.indices], 
@@ -117,7 +134,11 @@ class DataLoader:
             new_idxs = np.argwhere((self.indices >= 0)*(self.timesteps >= self.rollout_lengths[nonnegative_indices])).squeeze(-1)
             cur_idxs = np.argwhere((self.indices >= 0)*(self.timesteps < self.rollout_lengths[nonnegative_indices])).squeeze(-1)
             self.indices[new_idxs] = -1
-            self.timesteps[new_idxs] = 0
+            if self.start_state == "initial":
+                # start at initial state for each rollout
+                self.timesteps[new_idxs] = 0
+            else:
+                raise NotImplementedError
             if self.avail_indices is not None:
                 if len(new_idxs) < len(self.avail_indices):
                     self.indices[new_idxs] = self.avail_indices[:len(new_idxs)]
