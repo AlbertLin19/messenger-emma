@@ -8,5 +8,6 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
+bash
 conda activate messenger
 python train.py --world_model_key_type emma-mlp_scale --world_model_key_freeze --world_model_key_unfreeze_step 500000 --world_model_val_type emma-mlp_scale --world_model_val_freeze --world_model_val_unfreeze_step 500000
