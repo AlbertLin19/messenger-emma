@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=messenger_none
-#SBATCH --output=%x-%j.out
+#SBATCH --output=slurm_output/%x-%j.out
 #SBATCH -N 1 #nodes
 #SBATCH -n 1 #tasks
 #SBATCH --cpus-per-task=16
