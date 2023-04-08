@@ -8,6 +8,4 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
-bash
-conda activate messenger
-python train.py
+srun python train.py
