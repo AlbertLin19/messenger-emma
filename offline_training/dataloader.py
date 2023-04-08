@@ -73,12 +73,14 @@ class DataLoader:
     
     def reset(self):
         if self.mode == "random":
-            # randomly sample batch_size rollouts from data (with probability proportional to their lengths) and keep track of their lengths
-            self.indices = np.random.choice(self.n_rollouts, size=self.batch_size, p=self.rollout_probs)
             if self.start_state == "initial":
+                # randomly sample batch_size rollouts from data (with equal probability) and keep track of their lengths
+                self.indices = np.random.choice(self.n_rollouts, size=self.batch_size)
                 # start at initial state for each rollout
                 self.timesteps = np.zeros((self.batch_size), dtype=int)
             elif self.start_state == "anywhere":
+                # randomly sample batch_size rollouts from data (with probability proportional to their lengths) and keep track of their lengths
+                self.indices = np.random.choice(self.n_rollouts, size=self.batch_size, p=self.rollout_probs)
                 # randomly sample starting state for each rollout
                 self.timesteps = (np.random.rand(self.batch_size)*(self.rollout_lengths[self.indices] - 1)).astype(int)
             else:
@@ -110,11 +112,14 @@ class DataLoader:
             self.timesteps += 1
             new_idxs = np.argwhere(self.timesteps >= self.rollout_lengths[self.indices]).squeeze(-1)
             cur_idxs = np.argwhere(self.timesteps < self.rollout_lengths[self.indices]).squeeze(-1)
-            self.indices[new_idxs] = np.random.choice(self.n_rollouts, size=len(new_idxs), p=self.rollout_probs)
             if self.start_state == "initial":
+                # randomly sample batch_size rollouts from data (with equal probability) and keep track of their lengths
+                self.indices[new_idxs] = np.random.choice(self.n_rollouts, size=len(new_idxs))
                 # start at initial state for each rollout
                 self.timesteps[new_idxs] = 0
             elif self.start_state == "anywhere":
+                # randomly sample batch_size rollouts from data (with probability proportional to their lengths) and keep track of their lengths
+                self.indices[new_idxs] = np.random.choice(self.n_rollouts, size=len(new_idxs), p=self.rollout_probs)
                 self.timesteps[new_idxs] = (np.random.rand(len(new_idxs))*(self.rollout_lengths[self.indices[new_idxs]] - 1)).astype(int)
             else:
                 raise NotImplementedError
