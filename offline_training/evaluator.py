@@ -56,10 +56,10 @@ class Evaluator:
 
         self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
 
-        self.ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
-        self.ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
-        self.nontrivial_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
-        self.nontrivial_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.grid_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
+        self.grid_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.nontrivial_grid_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
+        self.nontrivial_grid_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
 
         self.reward_mse = 0
         self.reward_count = 0
@@ -136,20 +136,20 @@ class Evaluator:
                         if not missing:
                             break
 
-            # accumulate ln_perplexities
+            # accumulate grid_ln_perplexities
             all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1) # B x 17 x 101
             all_pred_log_probs = torch.log(all_pred_probs)
             true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
             all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1)
-            self.ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
-            self.ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.ones((len(cur_idxs), 17), dtype=int, device=self.device))
+            self.grid_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
+            self.grid_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.ones((len(cur_idxs), 17), dtype=int, device=self.device))
 
-            # accumulate nontrivial_ln_perplexities
+            # accumulate nontrivial_grid_ln_perplexities
             # using entity_ids: B x 3 array, where each row holds the 3 entity ids of a game
             entity_masks = torch.sum(F.one_hot(entity_ids, num_classes=17), dim=1) # B x 17
             entity_masks[:, 15:17] = 1 # avatar with/without message is always possible in a game
-            self.nontrivial_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((entity_masks.unsqueeze(-1)*all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
-            self.nontrivial_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=entity_masks[cur_idxs])
+            self.nontrivial_grid_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((entity_masks.unsqueeze(-1)*all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
+            self.nontrivial_grid_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=entity_masks[cur_idxs])
 
             # accumulate reward_mse and nontrivial_reward_mse
             self.reward_mse += torch.sum(torch.pow((pred_rewards - true_rewards)[cur_idxs], 2)).item()
@@ -238,11 +238,15 @@ class Evaluator:
             if not (self.game_grounding.sum(dim=-1) == 0).any():
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
 
-            # log perplexities
-            perplexities = np.exp((self.ln_perplexities / self.ln_perplexity_counts).cpu().numpy())
-            nontrivial_perplexities = np.exp((self.nontrivial_ln_perplexities / self.nontrivial_ln_perplexity_counts).cpu().numpy())
-            log.update({f'perplexity_{j}_t={i}': perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
-            log.update({f'nontrivial_perplexity_{j}_t={i}': nontrivial_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
+            # log grid_perplexities
+            log.update({'grid_perplexity': np.exp((self.grid_ln_perplexities.sum() / self.grid_ln_perplexity_counts.sum()).cpu().numpy())})
+            log.update({'nontrivial_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities.sum() / self.nontrivial_grid_ln_perplexity_counts.sum()).cpu().numpy())})
+            log.update({'entity_grid_perplexity': np.exp((self.grid_ln_perplexities[..., self.entity_idxs].sum() / self.grid_ln_perplexity_counts[..., self.entity_idxs].sum()).cpu().numpy())})
+            log.update({'nontrivial_entity_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities[..., self.entity_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[..., self.entity_idxs].sum()).cpu().numpy())})
+            grid_perplexities = np.exp((self.grid_ln_perplexities / self.grid_ln_perplexity_counts).cpu().numpy())
+            nontrivial_grid_perplexities = np.exp((self.nontrivial_grid_ln_perplexities / self.nontrivial_grid_ln_perplexity_counts).cpu().numpy())
+            log.update({f'grid_perplexity_{j}_t={i}': grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
+            log.update({f'nontrivial_grid_perplexity_{j}_t={i}': nontrivial_grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
 
             # log reward_mse
             log.update({f'reward_mse': self.reward_mse / self.reward_count})
