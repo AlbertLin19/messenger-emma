@@ -64,6 +64,13 @@ def train(args):
     train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", start_state=args.train_start_state, batch_size=args.batch_size)
     eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", start_state="initial", batch_size=args.eval_batch_size) for split in splits}
 
+    # eval metrics to log min over time
+    eval_metric_mins = [f"eval_{eval_split}_real_nontrivial_grid_perplexity" for eval_split in splits]
+    eval_metric_mins.extend([f"eval_{eval_split}_real_nontrivial_entity_grid_perplexity" for eval_split in splits])
+    eval_metric_mins.extend([f"eval_{eval_split}_real_nontrivial_reward_mse" for eval_split in splits])
+    eval_metric_mins.extend([f"eval_{eval_split}_real_nontrivial_done_perplexity" for eval_split in splits])
+    eval_metric_mins = {metric: float("inf") for metric in eval_metric_mins}
+
     # training variables
     step = 0
     start_time = time.time()
@@ -211,6 +218,10 @@ def train(args):
                         f"eval_{eval_split}_real_done_loss_perplexity": np.exp(eval_real_done_loss),
                         f"eval_{eval_split}_imag_done_loss_perplexity": np.exp(eval_imag_done_loss),
                     })
+                # log eval_metric_mins
+                for metric in eval_metric_mins.keys():
+                    eval_metric_mins[metric] = min(eval_updatelog[metric], eval_metric_mins[metric])
+                    eval_updatelog.update({f"{metric}_min": eval_metric_mins[metric]})
                 wandb.log(eval_updatelog)
 
         pbar.update(1)
