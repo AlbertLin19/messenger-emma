@@ -183,7 +183,7 @@ class BatchedWorldModel(nn.Module):
     def forward(self, multilabels, manuals, ground_truths, actions, lstm_states, shuffled_ids):
         embeddings = batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, self)
         if self.shuffle_ids:
-            embeddings[..., :len(self.relevant_cls_idxs)] = torch.gather(input=embeddings[..., :len(self.relevant_cls_idxs)], dim=-1, index=shuffled_ids.unsqueeze(1).expand(1, 10).unsqueeze(1).expand(1, 10))
+            embeddings[..., :len(self.relevant_cls_idxs)] = torch.gather(input=embeddings[..., :len(self.relevant_cls_idxs)], dim=-1, index=shuffled_ids.unsqueeze(1).unsqueeze(1).expand(-1, 10, 10, -1))
         latents = self.encode(embeddings)
         actions = F.one_hot(actions, num_classes=5)
         mem_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
@@ -200,7 +200,7 @@ class BatchedWorldModel(nn.Module):
             pred_nonexistence_logits = self.nonexistence(pred_latents)
         pred_grid_logits = self.detect(self.decode(pred_latents))
         if self.shuffle_ids:
-            pred_grid_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_grid_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1).unsqueeze(1).expand(1, 10).unsqueeze(1).expand(1, 10))
+            pred_grid_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_grid_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1).unsqueeze(1).unsqueeze(1).expand(-1, 10, 10, -1))
             pred_nonexistence_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_nonexistence_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1))
         pred_rewards = self.reward_head(mem_outs.squeeze(0))
         pred_done_logits = self.done_head(mem_outs.squeeze(0))
