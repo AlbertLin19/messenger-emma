@@ -8,4 +8,4 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
-srun python train.py --world_model_key_type emma-mlp_scale --world_model_key_freeze --world_model_key_unfreeze_step 500000 --world_model_val_type emma-mlp_scale --world_model_val_freeze --world_model_val_unfreeze_step 500000
+srun python train.py --dataset_path custom_dataset/dataset_32x.pickle --world_model_key_type emma-mlp_scale --world_model_val_type emma-mlp_scale

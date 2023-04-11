@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=messenger_emma-mlp_scale
+#SBATCH --job-name=messenger_none
 #SBATCH --output=slurm_output/%x-%j.out
 #SBATCH -N 1 #nodes
 #SBATCH -n 1 #tasks
@@ -8,4 +8,4 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
-srun python train.py --world_model_key_type emma-mlp_scale --world_model_val_type emma-mlp_scale
+srun python train.py --dataset_path custom_dataset/dataset_64x.pickle --world_model_val_type none
