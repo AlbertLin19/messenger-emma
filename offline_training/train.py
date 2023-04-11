@@ -308,7 +308,7 @@ if __name__ == "__main__":
         torch.cuda.manual_seed_all(args.seed)
     
     wandb.init(
-        project = "paper_running",
+        project = "paper_runs",
         entity = args.entity,
         group = f"key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_prediction_type}",
         name = str(int(time.time())),

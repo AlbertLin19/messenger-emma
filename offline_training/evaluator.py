@@ -167,35 +167,35 @@ class Evaluator:
         log = {}
 
         with torch.no_grad():
-            # calculate recalls, precisions, f1s
-            recalls = self.tps / (self.tps + self.fns)
-            precisions = self.tps / (self.tps + self.fps)
-            f1s = (2 * recalls * precisions) / (recalls + precisions)
+            # # calculate recalls, precisions, f1s
+            # recalls = self.tps / (self.tps + self.fns)
+            # precisions = self.tps / (self.tps + self.fps)
+            # f1s = (2 * recalls * precisions) / (recalls + precisions)
 
-            # log recall, precision, f1 for each timestep and their averages across timesteps
-            def logCurves(log_suffix, idxs):
-                recall = recalls[:, idxs].nanmean(dim=-1)
-                precision = precisions[:, idxs].nanmean(dim=-1)
-                f1 = f1s[:, idxs].nanmean(dim=-1)
+            # # log recall, precision, f1 for each timestep and their averages across timesteps
+            # def logCurves(log_suffix, idxs):
+            #     recall = recalls[:, idxs].nanmean(dim=-1)
+            #     precision = precisions[:, idxs].nanmean(dim=-1)
+            #     f1 = f1s[:, idxs].nanmean(dim=-1)
                         
-                timestep = np.arange(self.max_rollout_length)
-                log.update({
-                    # f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall.cpu().numpy()), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
-                    # f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision.cpu().numpy()), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
-                    # f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1.cpu().numpy()), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
-                    f'recall_{log_suffix}_avg': recall.nanmean(),
-                    f'precision_{log_suffix}_avg': precision.nanmean(),
-                    f'f1_{log_suffix}_avg': f1.nanmean(),
-                })
-                log.update({f'recall_{log_suffix}_{i}': recall[i] for i in range(self.max_rollout_length)})
-                log.update({f'precision_{log_suffix}_{i}': precision[i] for i in range(self.max_rollout_length)})
-                log.update({f'f1_{log_suffix}_{i}': f1[i] for i in range(self.max_rollout_length)})
+            #     timestep = np.arange(self.max_rollout_length)
+            #     log.update({
+            #         # f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall.cpu().numpy()), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
+            #         # f'precision_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, precision.cpu().numpy()), axis=-1), columns=['timestep', 'precision']), 'timestep', 'precision', title=f'{log_suffix}: Precision versus Timestep'),
+            #         # f'f1_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, f1.cpu().numpy()), axis=-1), columns=['timestep', 'f1']), 'timestep', 'f1', title=f'{log_suffix}: F1 versus Timestep'),
+            #         f'recall_{log_suffix}_avg': recall.nanmean(),
+            #         f'precision_{log_suffix}_avg': precision.nanmean(),
+            #         f'f1_{log_suffix}_avg': f1.nanmean(),
+            #     })
+            #     log.update({f'recall_{log_suffix}_{i}': recall[i] for i in range(self.max_rollout_length)})
+            #     log.update({f'precision_{log_suffix}_{i}': precision[i] for i in range(self.max_rollout_length)})
+            #     log.update({f'f1_{log_suffix}_{i}': f1[i] for i in range(self.max_rollout_length)})
 
-            for idx in self.relevant_cls_idxs:
-                logCurves(idx, [idx])
-            logCurves('sprite', self.sprite_idxs)
-            logCurves('entity', self.entity_idxs)
-            logCurves('avatar', [15, 16])
+            # for idx in self.relevant_cls_idxs:
+            #     logCurves(idx, [idx])
+            # logCurves('sprite', self.sprite_idxs)
+            # logCurves('entity', self.entity_idxs)
+            # logCurves('avatar', [15, 16])
 
             # log visualizations of predictions
             
@@ -239,14 +239,16 @@ class Evaluator:
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
 
             # log grid_perplexities
-            log.update({'grid_perplexity': np.exp((self.grid_ln_perplexities.sum() / self.grid_ln_perplexity_counts.sum()).cpu().numpy())})
-            log.update({'nontrivial_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities.sum() / self.nontrivial_grid_ln_perplexity_counts.sum()).cpu().numpy())})
-            log.update({'entity_grid_perplexity': np.exp((self.grid_ln_perplexities[..., self.entity_idxs].sum() / self.grid_ln_perplexity_counts[..., self.entity_idxs].sum()).cpu().numpy())})
-            log.update({'nontrivial_entity_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities[..., self.entity_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[..., self.entity_idxs].sum()).cpu().numpy())})
-            grid_perplexities = np.exp((self.grid_ln_perplexities / self.grid_ln_perplexity_counts).cpu().numpy())
-            nontrivial_grid_perplexities = np.exp((self.nontrivial_grid_ln_perplexities / self.nontrivial_grid_ln_perplexity_counts).cpu().numpy())
-            log.update({f'grid_perplexity_{j}_t={i}': grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
-            log.update({f'nontrivial_grid_perplexity_{j}_t={i}': nontrivial_grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
+            log.update({'grid_perplexity': np.exp((self.grid_ln_perplexities[:, self.relevant_cls_idxs].sum() / self.grid_ln_perplexity_counts[:, self.relevant_cls_idxs].sum()).cpu().numpy())})
+            log.update({'nontrivial_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities[:, self.relevant_cls_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[:, self.relevant_cls_idxs].sum()).cpu().numpy())})
+            log.update({f'nontrivial_grid_perplexity_t={i}': np.exp((self.nontrivial_grid_ln_perplexities[i, self.relevant_cls_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[i, self.relevant_cls_idxs].sum()).cpu().numpy()) for i in range(1, self.max_rollout_length)})
+            log.update({'entity_grid_perplexity': np.exp((self.grid_ln_perplexities[:, self.entity_idxs].sum() / self.grid_ln_perplexity_counts[:, self.entity_idxs].sum()).cpu().numpy())})
+            log.update({'nontrivial_entity_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities[:, self.entity_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[:, self.entity_idxs].sum()).cpu().numpy())})
+            log.update({f'nontrivial_entity_grid_perplexity_t={i}': np.exp((self.nontrivial_grid_ln_perplexities[i, self.entity_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[i, self.entity_idxs].sum()).cpu().numpy()) for i in range(1, self.max_rollout_length)})
+            # grid_perplexities = np.exp((self.grid_ln_perplexities / self.grid_ln_perplexity_counts).cpu().numpy())
+            # nontrivial_grid_perplexities = np.exp((self.nontrivial_grid_ln_perplexities / self.nontrivial_grid_ln_perplexity_counts).cpu().numpy())
+            # log.update({f'grid_perplexity_{j}_t={i}': grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
+            # log.update({f'nontrivial_grid_perplexity_{j}_t={i}': nontrivial_grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
 
             # log reward_mse
             log.update({f'reward_mse': self.reward_mse / self.reward_count})

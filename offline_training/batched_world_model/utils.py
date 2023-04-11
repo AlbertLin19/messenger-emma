@@ -16,7 +16,7 @@ ROLE_TYPES = {
 
 def batched_convert_grid_to_multilabel(grids):
     multilabels = torch.sum(F.one_hot(grids, num_classes=17), dim=-2)
-    multilabels[..., 0] = torch.sum(grids, dim=-1) < 1
+    multilabels[..., 0] = torch.sum(grids, dim=-1) < 1 # the empty class # NOTE: this channel should be entirely ignored when using prediction_type = location
     return multilabels
 
 def batched_ground(manuals, ground_truths, world_model):
