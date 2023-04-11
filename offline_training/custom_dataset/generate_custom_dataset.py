@@ -56,11 +56,11 @@ def wrap_obs(obs):
         (obs["entities"], obs["avatar"]), axis=-1
     )
 
-SAVE_PATH = "./dataset.pickle"
+SAVE_PATH = "./dataset_64x.pickle"
 SPLITS_PATH = "./splits.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
-NUM_REPEATS = 32
+NUM_REPEATS = 64
 MAX_ROLLOUT_LENGTH = 32
 
 with open(SPLITS_PATH, "r") as f:

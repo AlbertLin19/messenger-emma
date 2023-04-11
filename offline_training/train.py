@@ -35,6 +35,7 @@ def train(args):
         prediction_type=args.world_model_prediction_type,
         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+        shuffle_ids=args.shuffle_ids,
         device=args.device
     )
     if args.world_model_key_freeze:
@@ -163,6 +164,7 @@ def train(args):
                         prediction_type=args.world_model_prediction_type,
                         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
                         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+                        shuffle_ids=False,
                         device=args.device
                     )
                     eval_world_model.load_state_dict(world_model.state_dict())
@@ -261,7 +263,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_memory_type", default="lstm", choices=["mlp", "lstm"], help="NN type for memory module of world model.")
     
     # Dataset arguments
-    parser.add_argument("--dataset_path", default="custom_dataset/dataset.pickle", help="path to the dataset file")
+    parser.add_argument("--dataset_path", default="custom_dataset/dataset_64x.pickle", help="path to the dataset file")
       
     # Training arguments
     parser.add_argument("--train_start_state", default="initial", choices=["initial", "anywhere"], help="Which state that rollouts should start from during training")
@@ -270,11 +272,12 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", default=64, type=int, help="batch_size of training input")
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
     parser.add_argument("--max_step", default=1e7, type=int, help="max training step")
+    parser.add_argument("--shuffle_ids", default=False, action="store_true", help="Whether to augment the training data by shuffling sprite IDs")
 
     # Logging arguments
-    parser.add_argument('--eval_step', default=32768, type=int, help='number of steps between evaluations')
+    parser.add_argument('--eval_step', default=16384, type=int, help='number of steps between evaluations')
     parser.add_argument('--eval_batch_size', default=1024, type=int, help='batch_size for evaluation')
-    parser.add_argument('--n_frames', default=32, type=int, help='number of frames to visualize')
+    parser.add_argument('--n_frames', default=64, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
 

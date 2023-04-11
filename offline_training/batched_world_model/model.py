@@ -8,7 +8,7 @@ from offline_training.batched_world_model.modules import BatchedEncoder, Batched
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 class BatchedWorldModel(nn.Module):
-    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, reward_loss_weight, done_loss_weight, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, device):
+    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, reward_loss_weight, done_loss_weight, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, shuffle_ids, device):
         super().__init__()
 
         self.latent_size = latent_size 
@@ -139,7 +139,8 @@ class BatchedWorldModel(nn.Module):
         self.imag_backprop_count = 0
 
         self.pred_multilabel_threshold = pred_multilabel_threshold
-        self.refine_pred_multilabel = refine_pred_multilabel        
+        self.refine_pred_multilabel = refine_pred_multilabel
+        self.shuffle_ids = shuffle_ids        
         self.device = device
 
     def freeze_key(self):
@@ -179,8 +180,11 @@ class BatchedWorldModel(nn.Module):
     def detect(self, embs):
         return self.detector(embs.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
         
-    def forward(self, multilabels, manuals, ground_truths, actions, lstm_states):
-        latents = self.encode(batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, self))
+    def forward(self, multilabels, manuals, ground_truths, actions, lstm_states, shuffled_ids):
+        embeddings = batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, self)
+        if self.shuffle_ids:
+            embeddings[..., :len(self.relevant_cls_idxs)] = torch.gather(input=embeddings[..., :len(self.relevant_cls_idxs)], dim=-1, index=shuffled_ids.unsqueeze(1).expand(1, 10).unsqueeze(1).expand(1, 10))
+        latents = self.encode(embeddings)
         actions = F.one_hot(actions, num_classes=5)
         mem_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
         if self.memory_type == "mlp":
@@ -195,6 +199,9 @@ class BatchedWorldModel(nn.Module):
         if self.prediction_type == "location":
             pred_nonexistence_logits = self.nonexistence(pred_latents)
         pred_grid_logits = self.detect(self.decode(pred_latents))
+        if self.shuffle_ids:
+            pred_grid_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_grid_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1).unsqueeze(1).expand(1, 10).unsqueeze(1).expand(1, 10))
+            pred_nonexistence_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_nonexistence_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1))
         pred_rewards = self.reward_head(mem_outs.squeeze(0))
         pred_done_logits = self.done_head(mem_outs.squeeze(0))
         return ((pred_grid_logits, pred_nonexistence_logits), pred_rewards, pred_done_logits), (hidden_states, cell_states)
@@ -250,11 +257,16 @@ class BatchedWorldModel(nn.Module):
             self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.real_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.real_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            self.real_shuffled_ids = None
+            if self.shuffle_ids:
+                self.real_shuffled_ids = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (self.batch_size, len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
         else:
             init_grids = init_grids[idxs]
             self.real_hidden_states[:, idxs] = 0
             self.real_cell_states[:, idxs] = 0
             self.real_entity_ids[idxs] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values      
+            if self.shuffle_ids:
+                self.real_shuffled_ids[idxs] = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (len(idxs), len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
 
     def imag_state_reset(self, init_grids, idxs=None):
         if idxs is None:
@@ -262,12 +274,17 @@ class BatchedWorldModel(nn.Module):
             self.imag_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
             self.imag_old_multilabels = batched_convert_grid_to_multilabel(init_grids)
             self.imag_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            self.imag_shuffled_ids = None
+            if self.shuffle_ids:
+                self.imag_shuffled_ids = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (self.batch_size, len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
         else:
             init_grids = init_grids[idxs]
             self.imag_hidden_states[:, idxs] = 0
             self.imag_cell_states[:, idxs] = 0
             self.imag_old_multilabels[idxs] = batched_convert_grid_to_multilabel(init_grids)
             self.imag_entity_ids[idxs] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            if self.shuffle_ids:
+                self.imag_shuffled_ids[idxs] = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (len(idxs), len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
 
     def real_state_detach(self):
         self.real_hidden_states = self.real_hidden_states.detach()
@@ -284,7 +301,7 @@ class BatchedWorldModel(nn.Module):
         probs = self.multilabel_to_prob(multilabels)
         done_probs = dones.float()
 
-        (pred_loc_logits, pred_rewards, pred_done_logits), (self.real_hidden_states, self.real_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.real_hidden_states, self.real_cell_states))
+        (pred_loc_logits, pred_rewards, pred_done_logits), (self.real_hidden_states, self.real_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.real_hidden_states, self.real_cell_states), self.real_shuffled_ids)
         pred_grid_logits, pred_nonexistence_logits = pred_loc_logits
         n_backprops = len(backprop_idxs)
         self.real_grid_loss_total += n_backprops*self.grid_loss(pred_grid_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
@@ -304,7 +321,7 @@ class BatchedWorldModel(nn.Module):
         probs = self.multilabel_to_prob(multilabels)
         done_probs = dones.float()
 
-        (pred_loc_logits, pred_rewards, pred_done_logits), (self.imag_hidden_states, self.imag_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.imag_hidden_states, self.imag_cell_states))
+        (pred_loc_logits, pred_rewards, pred_done_logits), (self.imag_hidden_states, self.imag_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.imag_hidden_states, self.imag_cell_states), self.imag_shuffled_ids)
         pred_grid_logits, pred_nonexistence_logits = pred_loc_logits
         n_backprops = len(backprop_idxs)
         self.imag_grid_loss_total += n_backprops*self.grid_loss(pred_grid_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
