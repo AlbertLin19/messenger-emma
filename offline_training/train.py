@@ -36,6 +36,7 @@ def train(args):
         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
         dropout_prob=args.dropout_prob,
+        dropout_loc=args.dropout_loc,
         shuffle_ids=args.shuffle_ids,
         device=args.device
     )
@@ -166,6 +167,7 @@ def train(args):
                         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
                         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
                         dropout_prob=0,
+                        dropout_loc=args.dropout_loc,
                         shuffle_ids=False,
                         device=args.device
                     )
@@ -277,6 +279,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_step", default=1e7, type=int, help="max training step")
     parser.add_argument("--shuffle_ids", default=False, action="store_true", help="Whether to augment the training data by shuffling sprite IDs")
     parser.add_argument("--dropout_prob", default=0.15, type=float, help="probability of dropout layer")
+    parser.add_argument("--dropout_loc", default="input", choices=["input", "network", "input,network"], help="Where dropout should occur")
 
     # Logging arguments
     parser.add_argument('--eval_step', default=16384, type=int, help='number of steps between evaluations')

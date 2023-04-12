@@ -8,7 +8,7 @@ from offline_training.batched_world_model.modules import BatchedEncoder, Batched
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 class BatchedWorldModel(nn.Module):
-    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, reward_loss_weight, done_loss_weight, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, dropout_prob, shuffle_ids, device):
+    def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, reward_loss_weight, done_loss_weight, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, dropout_prob, dropout_loc, shuffle_ids, device):
         super().__init__()
 
         self.latent_size = latent_size 
@@ -98,8 +98,9 @@ class BatchedWorldModel(nn.Module):
 
         emb_dim = val_dim + len(self.relevant_cls_idxs)
         self.encoder = nn.Sequential(
-            nn.Dropout(p=dropout_prob),
+            nn.Dropout(p=dropout_prob if "input" in dropout_loc else 0),
             BatchedEncoder(emb_dim, latent_size),
+            nn.Dropout(p=dropout_prob if "network" in dropout_loc else 0),
         ).to(device)
         if self.memory_type == "mlp":
             self.mlp = nn.Sequential(
