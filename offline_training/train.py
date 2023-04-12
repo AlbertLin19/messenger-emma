@@ -35,6 +35,7 @@ def train(args):
         prediction_type=args.world_model_prediction_type,
         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+        dropout_prob=args.dropout_prob,
         shuffle_ids=args.shuffle_ids,
         device=args.device
     )
@@ -164,10 +165,12 @@ def train(args):
                         prediction_type=args.world_model_prediction_type,
                         pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
                         refine_pred_multilabel=args.world_model_refine_pred_multilabel,
+                        dropout_prob=0,
                         shuffle_ids=False,
                         device=args.device
                     )
                     eval_world_model.load_state_dict(world_model.state_dict())
+                    eval_world_model.eval()
 
                     eval_real_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_real_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
                     eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
@@ -273,6 +276,7 @@ if __name__ == "__main__":
     parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
     parser.add_argument("--max_step", default=1e7, type=int, help="max training step")
     parser.add_argument("--shuffle_ids", default=False, action="store_true", help="Whether to augment the training data by shuffling sprite IDs")
+    parser.add_argument("--dropout_prob", default=0.15, type=float, help="probability of dropout layer")
 
     # Logging arguments
     parser.add_argument('--eval_step', default=16384, type=int, help='number of steps between evaluations')

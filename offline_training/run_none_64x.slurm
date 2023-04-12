@@ -8,4 +8,4 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
-srun python train.py --dataset_path custom_dataset/dataset_64x.pickle --world_model_val_type none
+srun python train.py --dataset_path custom_dataset/dataset_64x.pickle --dropout_prob 0 --world_model_val_type none
