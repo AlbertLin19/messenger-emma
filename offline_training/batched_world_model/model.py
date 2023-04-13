@@ -144,6 +144,8 @@ class BatchedWorldModel(nn.Module):
 
         self.pred_multilabel_threshold = pred_multilabel_threshold
         self.refine_pred_multilabel = refine_pred_multilabel
+        self.dropout_prob = dropout_prob
+        self.dropout_loc = dropout_loc
         self.shuffle_ids = shuffle_ids        
         self.device = device
 
@@ -188,6 +190,8 @@ class BatchedWorldModel(nn.Module):
         embeddings = batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, self)
         if self.shuffle_ids:
             embeddings[..., :len(self.relevant_cls_idxs)] = torch.gather(input=embeddings[..., :len(self.relevant_cls_idxs)], dim=-1, index=shuffled_ids.unsqueeze(1).unsqueeze(1).expand(-1, 10, 10, -1))
+        if "sprite" in self.dropout_loc:
+            F.dropout(embeddings[..., :len(self.relevant_cls_idxs)], p=self.dropout_prob, training=self.training, inplace=True)
         latents = self.encode(embeddings)
         actions = F.one_hot(actions, num_classes=5)
         mem_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
