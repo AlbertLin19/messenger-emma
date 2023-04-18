@@ -5,6 +5,7 @@ import wandb
 
 from offline_training.batched_world_model.utils import batched_ground, ENTITY_IDS
 
+# colors for grid visualizations
 COLORS = torch.tensor([
         [0, 0, 0], # 0 background
         [255, 0, 0], # 1 dirt
@@ -25,10 +26,11 @@ COLORS = torch.tensor([
         [255, 0, 255], # 16 with_message
     ])
 
+# evaluate model predictions across a battery of metrics
 class Evaluator:
     def __init__(self, world_model, log_prefix, max_rollout_length, relevant_cls_idxs, n_frames, device):
         self.world_model = world_model
-        self.log_prefix = log_prefix
+        self.log_prefix = log_prefix # prefix for wandb log name
         self.max_rollout_length = max_rollout_length
         self.relevant_cls_idxs = relevant_cls_idxs.cpu()
         self.n_frames = n_frames
@@ -40,6 +42,7 @@ class Evaluator:
 
         self.reset()
 
+    # reset all metrics
     def reset(self):
         self.tps = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
         self.fns = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
@@ -70,7 +73,10 @@ class Evaluator:
         self.nontrivial_done_ln_perplexity = 0
         self.nontrivial_done_count = 0
 
+    # evaluate results from world_model
     def push(self, results, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
+        
+        # unpack arguments
         preds, labels = results
         pred_locs, pred_rewards, pred_done_probs = preds
         pred_probs_tuple, pred_multilabels = pred_locs
@@ -81,13 +87,13 @@ class Evaluator:
         new_idxs, cur_idxs = idxs_tuple
 
         with torch.no_grad():
-            # increment tps, fns, and fps for ongoing trajectories
+            # evaluate true positives (tps), false negatives (fns), and false positives (fps) for ongoing trajectories
             confusions = pred_multilabels / true_multilabels # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
             self.tps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == 1, dim=(1, 2))[cur_idxs])
             self.fns.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == 0, dim=(1, 2))[cur_idxs])
             self.fps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == float('inf'), dim=(1, 2))[cur_idxs])
 
-            # store single frame from first trajectory in batch (if ongoing) for each of the videos
+            # store single frame from first rollout in batch (if ongoing) for each of the video types
             if (cur_idxs == 0).any():
                 self.pred_probs_for_vid.append(pred_probs[0].cpu())
                 if len(self.pred_probs_for_vid) > self.n_frames:
@@ -102,7 +108,7 @@ class Evaluator:
                 if len(self.true_multilabels_for_vid) > self.n_frames:
                     self.true_multilabels_for_vid.pop(0)
 
-            # accumulate manuals and ground_truths
+            # accumulate manuals and ground_truths for future evaluation of grounding
             missing = None in self.manual.values()
             for i in new_idxs:
                 if not missing:
@@ -120,7 +126,7 @@ class Evaluator:
                         if not missing:
                             break
 
-            # accumulate game_grounding as an alternative to the full-sample grounding
+            # accumulate per-game grounding as an alternative to the full-sample grounding
             missing = (self.game_grounding.sum(dim=-1) == 0).any()
             for i in new_idxs:
                 if not missing:
@@ -198,7 +204,6 @@ class Evaluator:
             # logCurves('avatar', [15, 16])
 
             # log visualizations of predictions
-            
             true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
             pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
             probs = torch.cat((true_probs, pred_probs), dim=2)
@@ -211,7 +216,7 @@ class Evaluator:
             log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
             log.update({'multilabels': wandb.Video(torch.min(torch.sum((multilabels.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
 
-            # log grounding and token attention table
+            # evaluate and log grounding and token attention table
             if not (None in self.manual.values()):
                 manual = torch.stack([self.manual[idx.item()] for idx in self.sorted_entity_idxs], dim=0)
                 ground_truth = [self.ground_truth[idx.item()] for idx in self.sorted_entity_idxs]
@@ -234,7 +239,7 @@ class Evaluator:
                         column_names.append('value')
                     log.update({'token_attention': wandb.Table(columns=column_names, data=np.stack(columns, axis=-1))})
 
-            # log game_grounding as an alternative
+            # evaluate and log game_grounding as an alternative
             if not (self.game_grounding.sum(dim=-1) == 0).any():
                 log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
 

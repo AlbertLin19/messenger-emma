@@ -1,6 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 
+# mappings from Jens keywords to Messenger keywords
 CUSTOM_TO_MESSENGER_ENTITY = {
     "robot": "robot",
     "airplane": "airplane",
@@ -26,6 +27,7 @@ CUSTOM_TO_MESSENGER_ROLE = {
     "goal": "goal",
 }
 
+# helper function to retrieve the manual of ith game in dataset's split
 def get_manual(dataset, split, i):
     texts = dataset["texts"]
     entities = dataset["keys"]["entities"]
@@ -35,6 +37,7 @@ def get_manual(dataset, split, i):
     ground_truth_idx = dataset["rollouts"][split]["ground_truth_idxs"][i]
     return [texts[entities[ground_truth_idx[j][0]]][dynamics[ground_truth_idx[j][1]]][roles[ground_truth_idx[j][2]]][split][manual_idx[j]] for j in range(len(manual_idx))]
 
+# helper function to retrieve the ground truth of ith game in dataset's split
 def get_ground_truth(dataset, split, i):
     entities = dataset["keys"]["entities"]
     dynamics = dataset["keys"]["dynamics"]
@@ -43,13 +46,14 @@ def get_ground_truth(dataset, split, i):
     return [(CUSTOM_TO_MESSENGER_ENTITY[entities[ground_truth_idx[j][0]]], CUSTOM_TO_MESSENGER_DYNAMIC[dynamics[ground_truth_idx[j][1]]], CUSTOM_TO_MESSENGER_ROLE[roles[ground_truth_idx[j][2]]]) for j in range(len(ground_truth_idx))]
 
 # takes in custom dataset (which has its own custom keywords) 
-# and outputs in terms of Messenger keywords
+# and outputs batched data step-by-step (using Messenger keywords)
 class DataLoader:
     def __init__(self, dataset, split, max_rollout_length, mode, start_state, batch_size):
         self.n_rollouts = len(dataset["rollouts"][split]["manual_idxs"])
         self.rollout_lengths = np.array([min(len(sequence), max_rollout_length) for sequence in dataset["rollouts"][split]["grid_sequences"]])
         self.rollout_probs = (self.rollout_lengths-1)/np.sum(self.rollout_lengths-1)
 
+        # cache data
         self.manuals_array = np.zeros((self.n_rollouts), dtype=object)
         self.ground_truths_array = np.zeros((self.n_rollouts), dtype=object)
         self.action_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=int)
@@ -65,12 +69,17 @@ class DataLoader:
             self.grid_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["grid_sequences"][i][:max_rollout_length]
         print("n_rollouts:", self.n_rollouts, "; max_rollout_length:", np.max(self.rollout_lengths))
 
+        # sampling method for rollouts
         self.mode = mode 
         assert mode in ["random", "static"]
+
+        # sampling method for initial states
         self.start_state = start_state
         assert start_state in ["initial", "anywhere"]
+        
         self.batch_size = batch_size
     
+    # retrieve initial-state data
     def reset(self):
         if self.mode == "random":
             if self.start_state == "initial":
@@ -107,6 +116,7 @@ class DataLoader:
         else:
             raise NotImplementedError
 
+    # retrieve next-step data
     def step(self):
         if self.mode == "random":
             self.timesteps += 1
@@ -144,6 +154,7 @@ class DataLoader:
                 self.timesteps[new_idxs] = 0
             else:
                 raise NotImplementedError
+            # retrieve unused rollouts if any still remain
             if self.avail_indices is not None:
                 if len(new_idxs) < len(self.avail_indices):
                     self.indices[new_idxs] = self.avail_indices[:len(new_idxs)]
