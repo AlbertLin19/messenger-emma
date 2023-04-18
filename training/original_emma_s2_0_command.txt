@@ -1,1 +1,0 @@
-python train.py --stage 2 --lr 0.00005 --update_timestep 64 --optimizer Adam --weight_decay 0.0 --max_time 16 --max_steps 64 --gamma 0.99 --freeze_attention --entity aklin --log_group emma_s2 --seed 0 --output stage_2/output/original_emma_s2_0 --load_state stage_1/output/original_emma_s1_0_max.pth
