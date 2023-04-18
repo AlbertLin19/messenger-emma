@@ -2,6 +2,8 @@ import torch
 import torch.nn.functional as F
 
 from messenger.envs.config import NPCS
+
+# oracle value mappings
 ENTITY_IDS = {entity.name: entity.id for entity in NPCS}
 MOVEMENT_TYPES = {
     "chaser": 0,
@@ -14,11 +16,13 @@ ROLE_TYPES = {
     "enemy": 5,
 }
 
+# convert grids (B x 10 x 10 x 4) to multilabel representation (B x 10 x 10 x 17)
 def batched_convert_grid_to_multilabel(grids):
     multilabels = torch.sum(F.one_hot(grids, num_classes=17), dim=-2)
     multilabels[..., 0] = torch.sum(grids, dim=-1) < 1 # the empty class # NOTE: this channel should be entirely ignored when using prediction_type = location
     return multilabels
 
+# for every entity, compute weights of attention across descriptors in the manuals (B x 17 x n_sent)
 def batched_ground(manuals, ground_truths, world_model):
     query = world_model.sprite_emb(torch.arange(17, device=world_model.device)) # 17 x key_dim
     if world_model.key_type == "oracle":
@@ -45,6 +49,7 @@ def batched_ground(manuals, ground_truths, world_model):
     
     return weights
 
+# convert multilabel representation (B x 10 x 10 x 17) to embedding representation (B x 10 x 10 x emb_dim (17 + val_dim))
 def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world_model):
     if world_model.val_type == "oracle":
         # scale one_hot to cancel the subsequent averaging over descriptions
@@ -71,6 +76,7 @@ def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world
     entity_values = torch.sum(entity_values, dim=-2)                                 # B x 10 x 10 x val_dim
     return torch.cat((multilabels[..., world_model.relevant_cls_idxs], entity_values), dim=-1)
 
+# convert probability representation (B x 10 x 10 x 17 probabilities & B x 17 nonexistence (in the case of 'location' prediction type)) to multilabel representation (B x 10 x 10 x 17)
 def batched_convert_prob_to_multilabel(probs, nonexistence_probs, prediction_type, threshold, refine, entity_ids):
     if prediction_type == "existence":
         multilabels = 1*(probs > threshold) # B x 10 x 10 x 17
@@ -78,6 +84,7 @@ def batched_convert_prob_to_multilabel(probs, nonexistence_probs, prediction_typ
         multilabels = 1*(probs > probs[..., 0:1])
     elif prediction_type == "location":
         multilabels = 1*(probs > nonexistence_probs[:, None, None, :])
+    # refine multilabel representation using domain knowledge (i.e. only 1 of each type)
     if refine:
         multilabels = multilabels*(probs >= torch.amax(probs, dim=(1, 2), keepdim=True))
         multilabels[..., 15:17] = (probs[..., 15:17] >= torch.amax(probs[..., 15:17], dim=(1, 2, 3), keepdim=True))

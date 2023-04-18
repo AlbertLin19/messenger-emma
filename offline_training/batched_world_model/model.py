@@ -11,32 +11,41 @@ class BatchedWorldModel(nn.Module):
     def __init__(self, key_type, key_dim, val_type, val_dim, memory_type, latent_size, hidden_size, batch_size, learning_rate, reward_loss_weight, done_loss_weight, prediction_type, pred_multilabel_threshold, refine_pred_multilabel, dropout_prob, dropout_loc, shuffle_ids, device):
         super().__init__()
 
+        # world model parameters
         self.latent_size = latent_size 
         self.memory_type = memory_type
         self.hidden_size = hidden_size
         self.batch_size = batch_size
 
+        # text module parameters
         self.key_type = key_type
         self.val_type = val_type
         self.val_dim = val_dim
 
         if key_type == "oracle":
+            # entity query vector
             self.sprite_emb = lambda x: F.one_hot(x, num_classes=17).float()
 
         elif key_type == "emma":
-            self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+            # entity query vector
+            self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device)
             self.attn_scale = np.sqrt(key_dim)
-            self.txt_key = nn.Linear(768, key_dim).to(device)
-            self.scale_key = nn.Sequential(
+            
+            # descriptor key module
+            self.txt_key = nn.Linear(768, key_dim).to(device) # token embedding -> key embedding
+            self.scale_key = nn.Sequential(                   # linear combination weights for key embeddings
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
 
         elif key_type == "emma-mlp_scale":
-            self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device) # sprite embedding layer
+            # entity query vector
+            self.sprite_emb = nn.Embedding(17, key_dim, padding_idx=0).to(device)
             self.attn_scale = np.sqrt(key_dim)
-            self.txt_key = nn.Linear(768, key_dim).to(device)
-            self.scale_key = nn.Sequential(
+
+            # descriptor key module
+            self.txt_key = nn.Linear(768, key_dim).to(device) # token embedding -> key embedding
+            self.scale_key = nn.Sequential(                   # linear combination weights for key embeddings
                 nn.Linear(768, 384),
                 nn.ReLU(),
                 nn.Linear(384, 1),
@@ -47,25 +56,30 @@ class BatchedWorldModel(nn.Module):
             raise NotImplementedError
 
         if val_type == "oracle":
+            # avatar value embeddings
             self.avatar_no_message_val_emb = torch.tensor([0, 0, 0, 0, 0, 0, 1], device=device)
             self.avatar_with_message_val_emb = torch.tensor([0, 0, 0, 0, 0, 0, 1], device=device)
         
         elif val_type == "emma":
+            # avatar value embeddings
             self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
             self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
         
-            self.txt_val = nn.Linear(768, val_dim).to(device)
-            self.scale_val = nn.Sequential(
+            # descriptor value module
+            self.txt_val = nn.Linear(768, val_dim).to(device) # token embedding -> value embedding
+            self.scale_val = nn.Sequential(                   # linear combination weights for value embeddings
                 nn.Linear(768, 1),
                 nn.Softmax(dim=-2)
             ).to(device)
 
         elif val_type == "emma-mlp_scale":
+            # avatar value embeddings
             self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
             self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
         
-            self.txt_val = nn.Linear(768, val_dim).to(device)
-            self.scale_val = nn.Sequential(
+            # descriptor value module
+            self.txt_val = nn.Linear(768, val_dim).to(device) # token embedding -> value embedding
+            self.scale_val = nn.Sequential(                   # linear combination weights for value embeddings
                 nn.Linear(768, 384),
                 nn.ReLU(),
                 nn.Linear(384, 1),
@@ -79,29 +93,37 @@ class BatchedWorldModel(nn.Module):
             raise NotImplementedError
 
         self.prediction_type = prediction_type
+        
+        # i.e. grid(i, j) is probability that sprite type j exists at location i (independently of other (i, j))
         if self.prediction_type == "existence":
-            self.pos_weight = 10*torch.ones(17, device=device)
-            self.pos_weight[0] = 3 / 100
-            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
+            self.pos_weight = 10*torch.ones(17, device=device) # loss weighting for existence of sprites, reweighted due to large bias of nonexistence of sprites
+            self.pos_weight[0] = 3 / 100 # empty sprite, reweighted due to large bias of existence of empty sprite
+            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device) # which sprites to use for eval metrics
 
+        # i.e. grid(i, j) is probability that location i is classified as sprite type j (grid(i, :) sums to 1)
         elif self.prediction_type == "class":
-            self.cls_weight = torch.ones(17, device=device)
-            self.cls_weight[0] = 3 / 100
-            self.relevant_cls_idxs = torch.tensor([0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
+            self.cls_weight = torch.ones(17, device=device) # loss weighting for classification of sprite types
+            self.cls_weight[0] = 3 / 100 # empty type, reweighted due to large bias of empty cell type
+            self.relevant_cls_idxs = torch.tensor([0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device) # which sprites to use for eval metrics
 
+        # i.e. grid(i, j) is probability that sprite type j is at location i (grid(:, j) sums to 1)
         elif self.prediction_type == "location":
-            self.loc_weight = torch.ones(101, device=device)
-            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device)
+            self.loc_weight = torch.ones(101, device=device) # loss reweighting for locations, no reweighting
+            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device) # which sprites to use for eval metrics
 
         else:
             raise NotImplementedError
 
-        emb_dim = val_dim + len(self.relevant_cls_idxs)
+        emb_dim = val_dim + len(self.relevant_cls_idxs) # size of input to encoder
+        
+        # input -> latent
         self.encoder = nn.Sequential(
             nn.Dropout(p=dropout_prob if "input" in dropout_loc else 0),
             BatchedEncoder(emb_dim, latent_size),
             nn.Dropout(p=dropout_prob if "network" in dropout_loc else 0),
         ).to(device)
+        
+        # latent + action -> hidden
         if self.memory_type == "mlp":
             self.mlp = nn.Sequential(
                 nn.Linear(latent_size + 5, hidden_size),
@@ -111,7 +133,11 @@ class BatchedWorldModel(nn.Module):
             self.lstm = nn.LSTM(latent_size + 5, hidden_size).to(device)
         else:
             raise NotImplementedError
+        
+        # hidden -> latent
         self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
+        
+        # latent -> grid output
         if prediction_type == "location":
             self.nonexistence = nn.Linear(in_features=latent_size, out_features=17).to(device)
         self.decoder = BatchedDecoder(emb_dim, latent_size).to(device)
@@ -120,19 +146,25 @@ class BatchedWorldModel(nn.Module):
             nn.ReLU(),
             nn.Conv2d(in_channels=(emb_dim + 17) // 2, out_channels=17, kernel_size=1, stride=1),
         ).to(device)
+        
+        # latent -> reward output
         self.reward_head = nn.Sequential(
             nn.Linear(in_features=hidden_size, out_features=1),
             nn.Flatten(start_dim=0, end_dim=-1),
         ).to(device)
+        
+        # latent -> done output
         self.done_head = nn.Sequential(
             nn.Linear(in_features=hidden_size, out_features=1),
             nn.Flatten(start_dim=0, end_dim=-1),
         ).to(device)
         
+        # training parameters
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
         self.reward_loss_weight = reward_loss_weight
         self.done_loss_weight = done_loss_weight
 
+        # loss accumulation
         self.real_grid_loss_total = 0
         self.real_reward_loss_total = 0
         self.real_done_loss_total = 0
@@ -142,6 +174,7 @@ class BatchedWorldModel(nn.Module):
         self.imag_done_loss_total = 0
         self.imag_backprop_count = 0
 
+        # training and prediction args
         self.pred_multilabel_threshold = pred_multilabel_threshold
         self.refine_pred_multilabel = refine_pred_multilabel
         self.dropout_prob = dropout_prob
@@ -260,6 +293,7 @@ class BatchedWorldModel(nn.Module):
             raise NotImplementedError
         return probs
 
+    # reset hidden states for real prediction
     def real_state_reset(self, init_grids, idxs=None):
         if idxs is None:
             self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
@@ -276,6 +310,8 @@ class BatchedWorldModel(nn.Module):
             if self.shuffle_ids:
                 self.real_shuffled_ids[idxs] = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (len(idxs), len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
 
+    
+    # reset hidden states for imag prediction
     def imag_state_reset(self, init_grids, idxs=None):
         if idxs is None:
             self.imag_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
@@ -294,15 +330,19 @@ class BatchedWorldModel(nn.Module):
             if self.shuffle_ids:
                 self.imag_shuffled_ids[idxs] = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (len(idxs), len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
 
+    
+    # detach hidden states for real prediction
     def real_state_detach(self):
         self.real_hidden_states = self.real_hidden_states.detach()
         self.real_cell_states = self.real_cell_states.detach()
 
+    # detach hidden states for imag prediction
     def imag_state_detach(self):
         self.imag_hidden_states = self.imag_hidden_states.detach()
         self.imag_cell_states = self.imag_cell_states.detach()
         self.imag_old_multilabels = self.imag_old_multilabels.detach()
 
+    # make real prediction and accumulate real loss
     def real_step(self, old_grids, manuals, ground_truths, actions, grids, rewards, dones, backprop_idxs):
         old_multilabels = batched_convert_grid_to_multilabel(old_grids)
         multilabels = batched_convert_grid_to_multilabel(grids)
@@ -323,6 +363,7 @@ class BatchedWorldModel(nn.Module):
             pred_done_probs = torch.sigmoid(pred_done_logits)
         return (((pred_grid_probs, pred_nonexistence_probs), pred_multilabels), pred_rewards, pred_done_probs), ((probs, multilabels), rewards, done_probs)
 
+    # make imag prediction and accumulate imag loss
     def imag_step(self, manuals, ground_truths, actions, grids, rewards, dones, backprop_idxs):
         old_multilabels = self.imag_old_multilabels
         multilabels = batched_convert_grid_to_multilabel(grids)
@@ -344,18 +385,21 @@ class BatchedWorldModel(nn.Module):
             pred_done_probs = torch.sigmoid(pred_done_logits)
         return (((pred_grid_probs, pred_nonexistence_probs), pred_multilabels), pred_rewards, pred_done_probs), ((probs, multilabels), rewards, done_probs)
 
+    # update model via real loss
     def real_loss_update(self):
         self.optimizer.zero_grad()
         real_loss_mean = (self.real_grid_loss_total + self.reward_loss_weight*self.real_reward_loss_total + self.done_loss_weight*self.real_done_loss_total) / self.real_backprop_count
         real_loss_mean.backward()
         self.optimizer.step()
 
+    # update model via imag loss
     def imag_loss_update(self):
         self.optimizer.zero_grad()
         imag_loss_mean = (self.imag_grid_loss_total + self.reward_loss_weight*self.imag_reward_loss_total + self.done_loss_weight*self.imag_done_loss_total) / self.imag_backprop_count
         imag_loss_mean.backward()
         self.optimizer.step()
 
+    # reset real loss
     def real_loss_reset(self):
         with torch.no_grad():
             real_grid_loss_mean = self.real_grid_loss_total / self.real_backprop_count
@@ -368,6 +412,7 @@ class BatchedWorldModel(nn.Module):
         self.real_backprop_count = 0
         return real_grid_loss_mean.item(), real_reward_loss_mean.item(), real_done_loss_mean.item(), real_loss_mean.item()
 
+    # reset imag loss
     def imag_loss_reset(self):
         with torch.no_grad():
             imag_grid_loss_mean = self.imag_grid_loss_total / self.imag_backprop_count
