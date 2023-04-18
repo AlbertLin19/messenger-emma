@@ -6,7 +6,6 @@ import argparse
 import time
 import pickle
 import random
-import hashlib
 import torch
 import torch.nn.functional as F
 import wandb
@@ -21,30 +20,33 @@ from evaluator import Evaluator
 
 def train(args):
     world_model = BatchedWorldModel(
-        key_type=args.world_model_key_type,
-        key_dim=args.world_model_key_dim,
-        val_type=args.world_model_val_type,
-        val_dim=args.world_model_val_dim,
-        memory_type=args.world_model_memory_type,
-        latent_size=args.world_model_latent_size,
-        hidden_size=args.world_model_hidden_size,
-        batch_size=args.batch_size,
-        learning_rate=args.world_model_learning_rate,
-        reward_loss_weight=args.world_model_reward_loss_weight,
-        done_loss_weight=args.world_model_done_loss_weight,
-        prediction_type=args.world_model_prediction_type,
-        pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,
-        refine_pred_multilabel=args.world_model_refine_pred_multilabel,
-        dropout_prob=args.dropout_prob,
-        dropout_loc=args.dropout_loc,
-        shuffle_ids=args.shuffle_ids,
+        key_type=args.world_model_key_type,                                     # method for how descriptors should be attended to
+        key_dim=args.world_model_key_dim,                                       # size of key vector
+        val_type=args.world_model_val_type,                                     # method for how entity (value) embeddings should be constructed from descriptors
+        val_dim=args.world_model_val_dim,                                       # size of value vector
+        memory_type=args.world_model_memory_type,                               # type of memory module (e.g. LSTM)
+        latent_size=args.world_model_latent_size,                               # size of latent grid representation
+        hidden_size=args.world_model_hidden_size,                               # size of hidden memory vector in memory module
+        batch_size=args.batch_size,                                             # batch size of inputs/outputs
+        learning_rate=args.world_model_learning_rate,                           # learning rate
+        reward_loss_weight=args.world_model_reward_loss_weight,                 # weight of reward loss
+        done_loss_weight=args.world_model_done_loss_weight,                     # weight of done loss
+        prediction_type=args.world_model_prediction_type,                       # type of model prediction (e.g. prob distr over locations)
+        pred_multilabel_threshold=args.world_model_pred_multilabel_threshold,   # output threshold to consider an entity present (used only when prediction_type == 'existence')
+        refine_pred_multilabel=args.world_model_refine_pred_multilabel,         # whether to refine reconstructed grids used during imagined rollouts
+        dropout_prob=args.dropout_prob,                                         # prob of dropout
+        dropout_loc=args.dropout_loc,                                           # where to apply dropout
+        shuffle_ids=args.shuffle_ids,                                           # whether to augment data by id shuffling
         device=args.device
     )
+
+    # freeze text module
     if args.world_model_key_freeze:
         world_model.freeze_key()
     if args.world_model_val_freeze:
         world_model.freeze_val()
 
+    # save architecture description to file
     with open(args.output + '_architecture.txt', 'w') as f:
         f.write(str(world_model))
 
@@ -56,6 +58,7 @@ def train(args):
     with open(args.dataset_path, "rb") as f:
         dataset = pickle.load(f)
 
+    # list of splits
     splits = list(dataset["rollouts"].keys())
     train_split = None
     for split in splits:
@@ -64,10 +67,11 @@ def train(args):
             break 
     assert train_split is not None
 
+    # create dataloaders for each split in the dataset
     train_dataloader = DataLoader(dataset, train_split, args.max_rollout_length, mode="random", start_state=args.train_start_state, batch_size=args.batch_size)
     eval_dataloaders = {split: DataLoader(dataset, split, args.max_rollout_length, mode="static", start_state="initial", batch_size=args.eval_batch_size) for split in splits}
 
-    # eval metrics to log min over time
+    # eval metrics to log the minimum of over time
     eval_metric_mins = [f"eval_{eval_split}_real_nontrivial_grid_perplexity" for eval_split in splits]
     eval_metric_mins.extend([f"eval_{eval_split}_real_nontrivial_entity_grid_perplexity" for eval_split in splits])
     eval_metric_mins.extend([f"eval_{eval_split}_real_nontrivial_reward_mse" for eval_split in splits])
@@ -78,14 +82,20 @@ def train(args):
     step = 0
     start_time = time.time()
 
+    # load initial data
     manuals, ground_truths, grids = train_dataloader.reset()
     manuals, tokens = encoder.encode(manuals)
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
+    
+    # reset world_model hidden states
     world_model.real_state_reset(tensor_grids)
     world_model.imag_state_reset(tensor_grids)
 
+    # main training loop
     pbar = tqdm(total=args.max_step)
-    while step < args.max_step: # main training loop
+    while step < args.max_step: 
+        
+        # unfreeze text module
         if args.world_model_key_freeze and ((args.world_model_key_unfreeze_step >= 0) and (step >= args.world_model_key_unfreeze_step)):
             world_model.unfreeze_key()
             args.world_model_key_freeze = False
@@ -93,6 +103,7 @@ def train(args):
             world_model.unfreeze_val()
             args.world_model_val_freeze = False
 
+        # load next-step data
         old_tensor_grids = tensor_grids
         manuals, ground_truths, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
         manuals, tokens = encoder.encode(manuals)
@@ -102,7 +113,7 @@ def train(args):
         tensor_dones = torch.from_numpy(dones).long().to(args.device)
         tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
     
-        # accumulate gradient
+        # predict and accumulate gradient
         if args.world_model_loss_source == "real":
             real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
             with torch.no_grad():
@@ -143,10 +154,11 @@ def train(args):
             }
             wandb.log(updatelog)
 
-        # reset states if new rollouts started
+        # reset world_model hidden states for new rollouts
         world_model.real_state_reset(tensor_grids, new_idxs)
         world_model.imag_state_reset(tensor_grids, new_idxs)
 
+        # perform evaluation
         if step % args.eval_step == 0:
             with torch.no_grad():
                 eval_updatelog = {"step": step}
@@ -174,17 +186,23 @@ def train(args):
                     eval_world_model.load_state_dict(world_model.state_dict())
                     eval_world_model.eval()
 
+                    # create evaluators
                     eval_real_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_real_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
                     eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
                 
+                    # load initial data
                     eval_manuals, eval_ground_truths, eval_grids, eval_n_rollouts = eval_dataloader.reset()
                     eval_manuals, eval_tokens = encoder.encode(eval_manuals)
                     eval_tensor_grids = torch.from_numpy(eval_grids).long().to(args.device)
+                    
+                    # reset eval_world_model hidden states
                     eval_world_model.real_state_reset(eval_tensor_grids)
                     eval_world_model.imag_state_reset(eval_tensor_grids)
 
                     eval_pbar = tqdm(total=eval_n_rollouts)
                     while True:
+                        
+                        # load next-step data
                         eval_old_tensor_grids = eval_tensor_grids
                         eval_manuals, eval_ground_truths, eval_actions, eval_grids, eval_rewards, eval_dones, (eval_new_idxs, eval_cur_idxs), eval_timesteps, eval_just_completes, eval_all_complete = eval_dataloader.step()
                         if eval_all_complete:
@@ -196,12 +214,15 @@ def train(args):
                         eval_tensor_dones = torch.from_numpy(eval_dones).long().to(args.device)
                         eval_tensor_timesteps = torch.from_numpy(eval_timesteps).long().to(args.device)
                     
+                        # predict
                         eval_real_results = eval_world_model.real_step(eval_old_tensor_grids, eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
                         eval_imag_results = eval_world_model.imag_step(eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
 
+                        # evaluate
                         eval_real_evaluator.push(eval_real_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.real_entity_ids, eval_tensor_timesteps)
                         eval_imag_evaluator.push(eval_imag_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.imag_entity_ids, eval_tensor_timesteps)
 
+                        # reset eval_world_model hidden states for new rollouts
                         eval_world_model.real_state_reset(eval_tensor_grids, eval_new_idxs)
                         eval_world_model.imag_state_reset(eval_tensor_grids, eval_new_idxs)
 
@@ -289,8 +310,12 @@ if __name__ == "__main__":
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
 
     args = parser.parse_args()
+    
+    # set output name
     if args.output is None:
         args.output = f"output/key-{args.world_model_key_type}-{args.world_model_key_dim}_value-{args.world_model_val_type}-{args.world_model_val_dim}_loss-{args.world_model_loss_source}-{args.world_model_prediction_type}_{int(time.time())}"
+    
+    # set correct sizes for oracle model
     if args.world_model_key_type == "oracle":
         args.world_model_key_dim = 17
     if args.world_model_val_type == "oracle":
@@ -299,24 +324,17 @@ if __name__ == "__main__":
         args.world_model_val_dim = 0 # none
 
     assert args.eval_step % args.update_step == 0
-    
-    # get hash of arguments minus seed
-    args_dict = vars(args).copy()
-    args_dict["device"] = None
-    args_dict["seed"] = None
-    args_dict["output"] = None
-    args_hash = hashlib.md5(
-        str(sorted(args_dict.items())).encode("utf-8")
-    ).hexdigest()
 
     args.device = torch.device(f"cuda:{args.device}")
 
-    if args.seed is not None: # seed everything
+    # seed everything
+    if args.seed is not None: 
         torch.manual_seed(args.seed)
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.cuda.manual_seed_all(args.seed)
     
+    # start wandb logging
     wandb.init(
         project = "paper_runs",
         entity = args.entity,
@@ -326,4 +344,5 @@ if __name__ == "__main__":
     )
     wandb.config.update(args)
     
+    # train
     train(args)
