@@ -29,6 +29,7 @@ def train(args):
         hidden_size=args.world_model_hidden_size,                               # size of hidden memory vector in memory module
         batch_size=args.batch_size,                                             # batch size of inputs/outputs
         learning_rate=args.world_model_learning_rate,                           # learning rate
+        weight_decay=args.world_model_weight_decay,                             # weight decay
         reward_loss_weight=args.world_model_reward_loss_weight,                 # weight of reward loss
         done_loss_weight=args.world_model_done_loss_weight,                     # weight of done loss
         prediction_type=args.world_model_prediction_type,                       # type of model prediction (e.g. prob distr over locations)
@@ -173,6 +174,7 @@ def train(args):
                         hidden_size=args.world_model_hidden_size,
                         batch_size=args.eval_batch_size,
                         learning_rate=args.world_model_learning_rate,
+                        weight_decay=args.world_model_weight_decay,
                         reward_loss_weight=args.world_model_reward_loss_weight,
                         done_loss_weight=args.world_model_done_loss_weight,
                         prediction_type=args.world_model_prediction_type,
@@ -282,6 +284,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
     parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
     parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_weight_decay", default=0, type=float, help="World model weight decay.")
     parser.add_argument("--world_model_reward_loss_weight", default=1, type=float, help="World model reward loss weight.")
     parser.add_argument("--world_model_done_loss_weight", default=1, type=float, help="World model done loss weight.")
     parser.add_argument("--world_model_loss_source", default="real", choices=["real", "imag"], help="Whether to train on loss of real or imaginary rollouts.")
