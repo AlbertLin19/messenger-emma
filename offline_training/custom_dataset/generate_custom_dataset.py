@@ -40,12 +40,19 @@ Collect rollouts of custom games of Stage 2 using a random policy and store into
 }
 '''
 
+import sys
+
+sys.path.append('../..')
+
 import gym
 import messenger
 import json
 import pickle
 import random
 import numpy as np
+
+import torch
+import torch.nn.functional as F
 
 from tqdm import tqdm
 
@@ -56,11 +63,11 @@ def wrap_obs(obs):
         (obs["entities"], obs["avatar"]), axis=-1
     )
 
-SAVE_PATH = "./dataset_64x.pickle"
+SAVE_PATH = "./dataset_1x.pickle"
 SPLITS_PATH = "./splits.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
-NUM_REPEATS = 64
+NUM_REPEATS = 1
 MAX_ROLLOUT_LENGTH = 32
 
 with open(SPLITS_PATH, "r") as f:
@@ -80,7 +87,7 @@ dataset = {
     "rollouts": {},
 }
 
-env = gym.make(f'msgr-custom-v2')
+env = gym.make(f'msgr-custom-v2', shuffle_obs=False)
 
 for split, games in splits.items():
     print(split)
@@ -97,7 +104,7 @@ for split, games in splits.items():
             obs = wrap_obs(obs)
             manual_idx = [texts[ground_truth[j][0]][ground_truth[j][1]][ground_truth[j][2]][split].index(manual[j]) for j in range(len(manual))]
             ground_truth_idx = [(keys['entities'].index(ground_truth[j][0]), keys['dynamics'].index(ground_truth[j][1]), keys['roles'].index(ground_truth[j][2])) for j in range(len(ground_truth))]
-            
+
             manual_idxs.append(manual_idx)
             ground_truth_idxs.append(ground_truth_idx)
             grid_sequence = [obs]
@@ -109,7 +116,7 @@ for split, games in splits.items():
             step = 1
             while not done:
                 if step >= MAX_ROLLOUT_LENGTH:
-                    break 
+                    break
                 step += 1
                 action = random.choice(range(5))
                 obs, reward, done, _ = env.step(action)
@@ -132,5 +139,6 @@ for split, games in splits.items():
         "done_sequences": done_sequences,
     }
 
+#print('DEBUG!!! uncomment saving')
 with open(SAVE_PATH, 'wb') as f:
     pickle.dump(dataset, f)

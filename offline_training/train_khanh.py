@@ -20,7 +20,7 @@ sys.path.append('..')
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 from messenger.models.utils import BatchedEncoder
-from offline_training.batched_world_model.model_dev import BatchedWorldModel
+from offline_training.batched_world_model.model_khanh import BatchedWorldModel
 from dataloader import DataLoader
 from evaluator import Evaluator
 
@@ -45,8 +45,10 @@ def train(args):
         dropout_prob=args.dropout_prob,                                         # prob of dropout
         dropout_loc=args.dropout_loc,                                           # where to apply dropout
         shuffle_ids=args.shuffle_ids,                                           # whether to augment data by id shuffling
+        attr_embed_dim=args.attr_embed_dim,
+        action_embed_dim=args.action_embed_dim,
         device=args.device
-    )
+    ).to(args.device)
 
     # freeze text module
     if args.world_model_key_freeze:
@@ -112,7 +114,7 @@ def train(args):
 
     # reset world_model hidden states
     world_model.real_state_reset(tensor_grids)
-    world_model.imag_state_reset(tensor_grids)
+    #world_model.imag_state_reset(tensor_grids)
 
     # main training loop
     #pbar = tqdm(total=args.max_step)
@@ -138,13 +140,25 @@ def train(args):
 
         # predict and accumulate gradient
         if args.world_model_loss_source == "real":
-            real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
-            with torch.no_grad():
-                imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
+            world_model.real_step(
+                old_tensor_grids,
+                manuals,
+                ground_truths,
+                tensor_actions,
+                tensor_grids,
+                tensor_rewards,
+                tensor_dones,
+                cur_idxs
+            )
+
+            #with torch.no_grad():
+            #    imag_results = world_model.imag_step(
+            #        manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
         elif args.world_model_loss_source == "imag":
             imag_results = world_model.imag_step(manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
             with torch.no_grad():
-                real_results = world_model.real_step(old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
+                real_results = world_model.real_step(
+                    old_tensor_grids, manuals, ground_truths, tensor_actions, tensor_grids, tensor_rewards, tensor_dones, cur_idxs)
         else:
             raise NotImplementedError
         step += 1
@@ -156,9 +170,9 @@ def train(args):
             elif args.world_model_loss_source == "imag":
                 world_model.imag_loss_update()
             real_grid_loss, real_reward_loss, real_done_loss, real_loss = world_model.real_loss_reset()
-            imag_grid_loss, imag_reward_loss, imag_done_loss, imag_loss = world_model.imag_loss_reset()
+            #imag_grid_loss, imag_reward_loss, imag_done_loss, imag_loss = world_model.imag_loss_reset()
             world_model.real_state_detach()
-            world_model.imag_state_detach()
+            #world_model.imag_state_detach()
 
             updatelog = {
                 "step": step,
@@ -166,21 +180,21 @@ def train(args):
                 "real_reward_loss": real_reward_loss,
                 "real_done_loss": real_done_loss,
                 "real_loss": real_loss,
-                "imag_grid_loss": imag_grid_loss,
-                "imag_reward_loss": imag_reward_loss,
-                "imag_done_loss": imag_done_loss,
-                "imag_loss": imag_loss,
+                #"imag_grid_loss": imag_grid_loss,
+                #"imag_reward_loss": imag_reward_loss,
+                #"imag_done_loss": imag_done_loss,
+                #"imag_loss": imag_loss,
                 "real_grid_loss_perplexity": np.exp(real_grid_loss),
-                "imag_grid_loss_perplexity": np.exp(imag_grid_loss),
+                #"imag_grid_loss_perplexity": np.exp(imag_grid_loss),
                 "real_done_loss_perplexity": np.exp(real_done_loss),
-                "imag_done_loss_perplexity": np.exp(imag_done_loss),
+                #"imag_done_loss_perplexity": np.exp(imag_done_loss),
             }
             if args.use_wandb:
                 wandb.log(updatelog)
 
         # reset world_model hidden states for new rollouts
         world_model.real_state_reset(tensor_grids, new_idxs)
-        world_model.imag_state_reset(tensor_grids, new_idxs)
+        #world_model.imag_state_reset(tensor_grids, new_idxs)
 
         # perform evaluation
         if step % args.eval_step == 0:
@@ -213,7 +227,7 @@ def train(args):
 
                     # create evaluators
                     eval_real_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_real_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
-                    eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
+                    #eval_imag_evaluator = Evaluator(eval_world_model, f"eval_{eval_split}_imag_", args.max_rollout_length, eval_world_model.relevant_cls_idxs, args.n_frames, args.device)
 
                     # load initial data
                     eval_manuals, eval_ground_truths, eval_grids, eval_n_rollouts = eval_dataloader.reset()
@@ -222,7 +236,7 @@ def train(args):
 
                     # reset eval_world_model hidden states
                     eval_world_model.real_state_reset(eval_tensor_grids)
-                    eval_world_model.imag_state_reset(eval_tensor_grids)
+                    #eval_world_model.imag_state_reset(eval_tensor_grids)
 
                     eval_pbar = tqdm(total=eval_n_rollouts)
                     while True:
@@ -241,35 +255,35 @@ def train(args):
 
                         # predict
                         eval_real_results = eval_world_model.real_step(eval_old_tensor_grids, eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
-                        eval_imag_results = eval_world_model.imag_step(eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
+                        #eval_imag_results = eval_world_model.imag_step(eval_manuals, eval_ground_truths, eval_tensor_actions, eval_tensor_grids, eval_tensor_rewards, eval_tensor_dones, eval_cur_idxs)
 
                         # evaluate
                         eval_real_evaluator.push(eval_real_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.real_entity_ids, eval_tensor_timesteps)
-                        eval_imag_evaluator.push(eval_imag_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.imag_entity_ids, eval_tensor_timesteps)
+                        #eval_imag_evaluator.push(eval_imag_results, (eval_manuals, eval_tokens), eval_ground_truths, (eval_new_idxs, eval_cur_idxs), eval_world_model.imag_entity_ids, eval_tensor_timesteps)
 
                         # reset eval_world_model hidden states for new rollouts
                         eval_world_model.real_state_reset(eval_tensor_grids, eval_new_idxs)
-                        eval_world_model.imag_state_reset(eval_tensor_grids, eval_new_idxs)
+                        #eval_world_model.imag_state_reset(eval_tensor_grids, eval_new_idxs)
 
                         eval_pbar.update(int(eval_just_completes.sum().item()))
 
                     eval_updatelog.update(eval_real_evaluator.getLog(step))
-                    eval_updatelog.update(eval_imag_evaluator.getLog(step))
+                    #eval_updatelog.update(eval_imag_evaluator.getLog(step))
                     eval_real_grid_loss, eval_real_reward_loss, eval_real_done_loss, eval_real_loss = eval_world_model.real_loss_reset()
-                    eval_imag_grid_loss, eval_imag_reward_loss, eval_imag_done_loss, eval_imag_loss = eval_world_model.imag_loss_reset()
+                    #eval_imag_grid_loss, eval_imag_reward_loss, eval_imag_done_loss, eval_imag_loss = eval_world_model.imag_loss_reset()
                     eval_updatelog.update({
                         f"eval_{eval_split}_real_grid_loss": eval_real_grid_loss,
                         f"eval_{eval_split}_real_reward_loss": eval_real_reward_loss,
                         f"eval_{eval_split}_real_done_loss": eval_real_done_loss,
                         f"eval_{eval_split}_real_loss": eval_real_loss,
-                        f"eval_{eval_split}_imag_grid_loss": eval_imag_grid_loss,
-                        f"eval_{eval_split}_imag_reward_loss": eval_imag_reward_loss,
-                        f"eval_{eval_split}_imag_done_loss": eval_imag_done_loss,
-                        f"eval_{eval_split}_imag_loss": eval_imag_loss,
+                        #f"eval_{eval_split}_imag_grid_loss": eval_imag_grid_loss,
+                        #f"eval_{eval_split}_imag_reward_loss": eval_imag_reward_loss,
+                        #f"eval_{eval_split}_imag_done_loss": eval_imag_done_loss,
+                        #f"eval_{eval_split}_imag_loss": eval_imag_loss,
                         f"eval_{eval_split}_real_grid_loss_perplexity": np.exp(eval_real_grid_loss),
-                        f"eval_{eval_split}_imag_grid_loss_perplexity": np.exp(eval_imag_grid_loss),
+                        #f"eval_{eval_split}_imag_grid_loss_perplexity": np.exp(eval_imag_grid_loss),
                         f"eval_{eval_split}_real_done_loss_perplexity": np.exp(eval_real_done_loss),
-                        f"eval_{eval_split}_imag_done_loss_perplexity": np.exp(eval_imag_done_loss),
+                        #f"eval_{eval_split}_imag_done_loss_perplexity": np.exp(eval_imag_done_loss),
                     })
                 # log eval_metric_mins
                 for metric in eval_metric_mins.keys():
@@ -306,9 +320,9 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_val_type", default="oracle", choices=["oracle", "emma", "emma-mlp_scale", "chatgpt", "none"], help="What to use to process the descriptors' value tokens.")
     parser.add_argument("--world_model_val_freeze", default=False, action="store_true", help="Whether to freeze val module.")
     parser.add_argument("--world_model_val_unfreeze_step", default=5e5, type=int, help="Train step to unfreeze val module, -1 means never.")
-    parser.add_argument("--world_model_latent_size", default=512, type=int, help="World model latent size.")
-    parser.add_argument("--world_model_hidden_size", default=1024, type=int, help="World model hidden size.")
-    parser.add_argument("--world_model_learning_rate", default=0.0005, type=float, help="World model learning rate.")
+    parser.add_argument("--world_model_latent_size", default=64, type=int, help="World model latent size.")
+    parser.add_argument("--world_model_hidden_size", default=256, type=int, help="World model hidden size.")
+    parser.add_argument("--world_model_learning_rate", default=0.0001, type=float, help="World model learning rate.")
     parser.add_argument("--world_model_weight_decay", default=0, type=float, help="World model weight decay.")
     parser.add_argument("--world_model_reward_loss_weight", default=1, type=float, help="World model reward loss weight.")
     parser.add_argument("--world_model_done_loss_weight", default=1, type=float, help="World model done loss weight.")
@@ -337,6 +351,8 @@ if __name__ == "__main__":
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
     parser.add_argument('--use_wandb', type=int, default=0, help='log to wandb?')
+    parser.add_argument('--attr_embed_dim', type=int, default=64, help='embedding dim')
+    parser.add_argument('--action_embed_dim', type=int, default=64, help='embedding dim')
 
     args = parser.parse_args()
 

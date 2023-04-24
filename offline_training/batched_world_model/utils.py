@@ -28,14 +28,14 @@ def batched_ground(manuals, ground_truths, world_model):
     if world_model.key_type == "oracle":
         keys = F.one_hot(torch.tensor([[ENTITY_IDS[truth[0]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=17).float()
     elif "emma" in world_model.key_type:
-        # Attention-based text representation        
+        # Attention-based text representation
         keys = world_model.txt_key(manuals)                                     # B x n_sent x sent_len x key_dim
         key_scales = world_model.scale_key(manuals)                             # B x n_sent x sent_len x 1
         keys = keys * key_scales                                                # B x n_sent x sent_len x key_dim
         keys = torch.sum(keys, dim=-2)                                          # B x n_sent x key_dim
     else:
         raise NotImplementedError
-        
+
     kqs = torch.matmul(keys, query.t()).permute(0, 2, 1)                        # B x 17 x n_sent
     if world_model.key_type == "oracle":
         return kqs
@@ -46,12 +46,13 @@ def batched_ground(manuals, ground_truths, world_model):
     else:
         # for other key_types, should I use world_model.attn_scale?
         raise NotImplementedError
-    
+
     return weights
 
 # convert multilabel representation (B x 10 x 10 x 17) to embedding representation (B x 10 x 10 x emb_dim (17 + val_dim))
 def batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, world_model):
     if world_model.val_type == "oracle":
+        print(ground_truths[0])
         # scale one_hot to cancel the subsequent averaging over descriptions
         values = manuals.shape[1]*F.one_hot(torch.tensor([[MOVEMENT_TYPES[truth[1]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=world_model.val_dim)
         values += manuals.shape[1]*F.one_hot(torch.tensor([[ROLE_TYPES[truth[2]] for truth in ground_truth] for ground_truth in ground_truths], device=world_model.device), num_classes=world_model.val_dim)
