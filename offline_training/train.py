@@ -6,6 +6,7 @@ import argparse
 import time
 import pickle
 import random
+import math
 import torch
 import torch.nn.functional as F
 import wandb
@@ -250,7 +251,8 @@ def train(args):
                     })
                 # log eval_metric_mins
                 for metric in eval_metric_mins.keys():
-                    eval_metric_mins[metric] = min(eval_updatelog[metric], eval_metric_mins[metric])
+                    if not math.isnan(eval_updatelog[metric]):
+                        eval_metric_mins[metric] = min(eval_updatelog[metric], eval_metric_mins[metric])
                     eval_updatelog.update({f"{metric}_min": eval_metric_mins[metric]})
                 wandb.log(eval_updatelog)
 
