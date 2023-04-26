@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import time
 import openai
@@ -118,7 +119,11 @@ for text_file in TEXT_FILES:
                 model="gpt-3.5-turbo", 
                 messages=[{"role": "user", "content": PROMPT_TEMPLATE % text}]
             )["choices"][0]["message"]["content"]
-            entity_id, movement_id, role_id = (response.strip() + ",").replace(" ", "").split(",")[:3]
+            # entity_id, movement_id, role_id = (response.strip() + ",").replace(" ", "").split(",")[:3]
+            id_list = re.findall(r'\d+', response)
+            entity_id = id_list[0] if len(id_list) >= 1 else ''
+            movement_id = id_list[1] if len(id_list) >= 2 else ''
+            role_id = id_list[2] if len(id_list) >= 3 else ''
             entity_id = int(entity_id) if entity_id.isdigit() else -1
             entity_id = entity_id if entity_id in ENTITY_IDS.values() else -1
             movement_id = int(movement_id) if movement_id.isdigit() else -1
