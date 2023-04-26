@@ -9,7 +9,5 @@
 #SBATCH --gres=gpu:1
 
 python3 -u train_khanh.py \
-                   --dataset_path custom_dataset/dataset_1x.pickle \
-                   --dropout_prob 0 \
-                   --exp_name oracle_1x \
-                   --use_wandb 0
+                   --dataset_path custom_dataset/dataset_10k_train_500_eval.pickle \
+                   --exp_name oracle_10k_train_500_eval

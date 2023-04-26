@@ -45,13 +45,21 @@ def get_ground_truth(dataset, split, i):
     ground_truth_idx = dataset["rollouts"][split]["ground_truth_idxs"][i]
     return [(CUSTOM_TO_MESSENGER_ENTITY[entities[ground_truth_idx[j][0]]], CUSTOM_TO_MESSENGER_DYNAMIC[dynamics[ground_truth_idx[j][1]]], CUSTOM_TO_MESSENGER_ROLE[roles[ground_truth_idx[j][2]]]) for j in range(len(ground_truth_idx))]
 
-# takes in custom dataset (which has its own custom keywords) 
+# takes in custom dataset (which has its own custom keywords)
 # and outputs batched data step-by-step (using Messenger keywords)
 class DataLoader:
-    def __init__(self, dataset, split, max_rollout_length, mode, start_state, batch_size):
-        self.n_rollouts = len(dataset["rollouts"][split]["manual_idxs"])
-        self.rollout_lengths = np.array([min(len(sequence), max_rollout_length) for sequence in dataset["rollouts"][split]["grid_sequences"]])
+    def __init__(self, dataset, split, max_rollout_length, mode, start_state, batch_size, max_rollouts=1e8):
+        self.n_rollouts = min(len(dataset["rollouts"][split]["manual_idxs"]), max_rollouts)
+        self.rollout_lengths = np.array(
+            [
+                min(len(sequence), max_rollout_length)
+                    for sequence in dataset["rollouts"][split]["grid_sequences"][:self.n_rollouts]
+            ]
+        )
         self.rollout_probs = (self.rollout_lengths-1)/np.sum(self.rollout_lengths-1)
+
+        #print(dataset['rollouts']['train_games']['grid_sequences'][41][0][:,:,3])
+        #print(dataset['rollouts']['train_games']['grid_sequences'][41][1][:,:,3])
 
         # cache data
         self.manuals_array = np.zeros((self.n_rollouts), dtype=object)
@@ -67,18 +75,19 @@ class DataLoader:
             self.reward_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["reward_sequences"][i][:max_rollout_length]
             self.done_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["done_sequences"][i][:max_rollout_length]
             self.grid_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["grid_sequences"][i][:max_rollout_length]
-        print("n_rollouts:", self.n_rollouts, "; max_rollout_length:", np.max(self.rollout_lengths))
+
+        print(split, "n_rollouts:", self.n_rollouts, "; max_rollout_length:", np.max(self.rollout_lengths))
 
         # sampling method for rollouts
-        self.mode = mode 
+        self.mode = mode
         assert mode in ["random", "static"]
 
         # sampling method for initial states
         self.start_state = start_state
         assert start_state in ["initial", "anywhere"]
-        
+
         self.batch_size = batch_size
-    
+
     # retrieve initial-state data
     def reset(self):
         if self.mode == "random":
@@ -120,6 +129,8 @@ class DataLoader:
     def step(self):
         if self.mode == "random":
             self.timesteps += 1
+            #print(self.timesteps)
+            #print(self.rollout_lengths[self.indices])
             new_idxs = np.argwhere(self.timesteps >= self.rollout_lengths[self.indices]).squeeze(-1)
             cur_idxs = np.argwhere(self.timesteps < self.rollout_lengths[self.indices]).squeeze(-1)
             if self.start_state == "initial":
@@ -133,14 +144,18 @@ class DataLoader:
                 self.timesteps[new_idxs] = (np.random.rand(len(new_idxs))*(self.rollout_lengths[self.indices[new_idxs]] - 1)).astype(int)
             else:
                 raise NotImplementedError
+
+            #print(self.indices[0], self.timesteps[0])
+            #print(self.grid_sequences_array[self.indices[0], self.timesteps[0]][:,:,3])
+
             return (
-                self.manuals_array[self.indices], 
-                self.ground_truths_array[self.indices], 
-                self.action_sequences_array[self.indices, self.timesteps], 
-                self.grid_sequences_array[self.indices, self.timesteps], 
-                self.reward_sequences_array[self.indices, self.timesteps], 
+                self.manuals_array[self.indices],
+                self.ground_truths_array[self.indices],
+                self.action_sequences_array[self.indices, self.timesteps],
+                self.grid_sequences_array[self.indices, self.timesteps],
+                self.reward_sequences_array[self.indices, self.timesteps],
                 self.done_sequences_array[self.indices, self.timesteps],
-                (new_idxs, cur_idxs), 
+                (new_idxs, cur_idxs),
                 self.timesteps,
             )
         elif self.mode == "static":
@@ -165,13 +180,13 @@ class DataLoader:
                     self.avail_indices = None
             nonnegative_indices = self.indices + (self.indices < 0)
             return (
-                self.manuals_array[nonnegative_indices], 
-                self.ground_truths_array[nonnegative_indices], 
-                self.action_sequences_array[nonnegative_indices, self.timesteps], 
-                self.grid_sequences_array[nonnegative_indices, self.timesteps], 
-                self.reward_sequences_array[nonnegative_indices, self.timesteps], 
+                self.manuals_array[nonnegative_indices],
+                self.ground_truths_array[nonnegative_indices],
+                self.action_sequences_array[nonnegative_indices, self.timesteps],
+                self.grid_sequences_array[nonnegative_indices, self.timesteps],
+                self.reward_sequences_array[nonnegative_indices, self.timesteps],
                 self.done_sequences_array[nonnegative_indices, self.timesteps],
-                (new_idxs, cur_idxs), 
+                (new_idxs, cur_idxs),
                 self.timesteps,
                 (self.indices >= 0)*(self.timesteps == (self.rollout_lengths[nonnegative_indices]-1)), # whether rollout was just completed
                 (self.indices < 0).all(), # whether all rollouts have been completed
