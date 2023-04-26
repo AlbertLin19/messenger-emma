@@ -8,6 +8,11 @@ MOVEMENT_TYPES = {
     "fleeing": 1,
     "immovable": 2,
 }
+ROLE_TYPES = {
+    "enemy": 0,
+    "message": 1,
+    "goal": 2,
+}
 
 TEXT_DIR = "../../messenger/envs/texts"
 SAVE_DIR = "../../messenger/envs/texts/chatgpt_groundings"
@@ -28,7 +33,7 @@ for text_file in TEXT_FILES:
                     if movement_type not in MOVEMENT_TYPES.keys():
                         continue
                     for movement_text in movement_texts:
-                        text_tuples.append((ENTITY_IDS[entity_type], MOVEMENT_TYPES[movement_type], movement_text))
+                        text_tuples.append((ENTITY_IDS[entity_type], MOVEMENT_TYPES[movement_type], ROLE_TYPES[role_type], movement_text))
     
     chatgpt_grounding_paths = [os.path.join(SAVE_DIR, "chatgpt_grounding_for_" + text_file)]
     while os.path.isfile(os.path.join(SAVE_DIR, f"refined_{len(chatgpt_grounding_paths)}_chatgpt_grounding_for_" + text_file)):
@@ -38,16 +43,55 @@ for text_file in TEXT_FILES:
             chatgpt_grounding = json.load(f)
             if len(chatgpt_grounding.keys()) == len(text_tuples):
                 print(f"version {i}")  
+
                 n_entity_correct = 0
+                n_entity_incorrect = 0
+                n_entity_null = 0
+
                 n_mvmt_correct = 0
+                n_mvmt_incorrect = 0
+                n_mvmt_null = 0
+
+                n_role_correct = 0
+                n_role_incorrect = 0
+                n_role_null = 0
+
                 for i in range(len(text_tuples)):
-                    entity_id_gt, movement_id_gt, text = text_tuples[i]
-                    entity_id, movement_id = chatgpt_grounding[text]
+                    entity_id_gt, movement_id_gt, role_id_gt, text = text_tuples[i]
+                    entity_id, movement_id, role_id = chatgpt_grounding[text]
+                    
                     if entity_id == entity_id_gt:
                         n_entity_correct += 1
+                    elif entity_id not in ENTITY_IDS.values():
+                        n_entity_null += 1
+                    else:
+                        n_entity_incorrect += 1
+
                     if movement_id == movement_id_gt:
                         n_mvmt_correct += 1
+                    elif movement_id not in MOVEMENT_TYPES.values():
+                        n_mvmt_null += 1
+                    else:
+                        n_mvmt_incorrect += 1
+
+                    if role_id == role_id_gt:
+                        n_role_correct += 1
+                    elif role_id not in ROLE_TYPES.values():
+                        n_role_null += 1
+                    else:
+                        n_role_incorrect += 1
+
                 print(f"entities correct: {n_entity_correct}/{len(text_tuples)} = {n_entity_correct/len(text_tuples)}")
+                print(f"entities incorrect: {n_entity_incorrect}/{len(text_tuples)} = {n_entity_incorrect/len(text_tuples)}")
+                print(f"entities null: {n_entity_null}/{len(text_tuples)} = {n_entity_null/len(text_tuples)}")
+
                 print(f"mvmts correct: {n_mvmt_correct}/{len(text_tuples)} = {n_mvmt_correct/len(text_tuples)}")
+                print(f"mvmts incorrect: {n_mvmt_incorrect}/{len(text_tuples)} = {n_mvmt_incorrect/len(text_tuples)}")
+                print(f"mvmts null: {n_mvmt_null}/{len(text_tuples)} = {n_mvmt_null/len(text_tuples)}")
+
+                print(f"roles correct: {n_role_correct}/{len(text_tuples)} = {n_role_correct/len(text_tuples)}")
+                print(f"roles incorrect: {n_role_incorrect}/{len(text_tuples)} = {n_role_incorrect/len(text_tuples)}")
+                print(f"roles null: {n_role_null}/{len(text_tuples)} = {n_role_null/len(text_tuples)}")
+
                 print()
     print()
