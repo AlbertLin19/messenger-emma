@@ -40,7 +40,7 @@ stationary: 2
 
 This is a list of role types and their corresponding IDs:
 enemy: 0
-message: 1
+secret message: 1
 goal: 2
 
 Respond strictly in the following format. Do not add anything else.
@@ -132,8 +132,9 @@ for text_file in TEXT_FILES:
             role_id = role_id if role_id in ROLE_TYPES.values() else -1
             chatgpt_grounding[text] = (entity_id, movement_id, role_id)
 
-            if entity_id < 0 or movement_id < 0 or role_id < 0:
-                print(response)
+            if entity_id < 0 or movement_id < 0 or role_id < 0 or entity_id != entity_id_gt or movement_id != movement_id_gt or role_id != role_id_gt:
+                print(f'response: {response}')
+                print(f'answer: {entity_id_gt}, {movement_id_gt}, {role_id_gt}')
 
             with open(chatgpt_grounding_path, "w") as f:
                 json.dump(chatgpt_grounding, f)
