@@ -39,9 +39,9 @@ fleeing: 1
 stationary: 2
 
 This is a list of role types and their corresponding IDs:
-enemy: 0
+dangerous enemy: 0
 secret message: 1
-goal: 2
+essential objective: 2
 
 Respond strictly in the following format. Do not add anything else.
 entity ID, movement ID, role ID
@@ -114,11 +114,17 @@ for text_file in TEXT_FILES:
                 json.dump(chatgpt_grounding, f)
             
         else:
-            time.sleep(0.2)
-            response = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo", 
-                messages=[{"role": "user", "content": PROMPT_TEMPLATE % text}]
-            )["choices"][0]["message"]["content"]
+            while True:
+                time.sleep(0.2)
+                try:
+                    response = openai.ChatCompletion.create(
+                        model="gpt-3.5-turbo", 
+                        messages=[{"role": "user", "content": PROMPT_TEMPLATE % text}]
+                    )["choices"][0]["message"]["content"]
+                except Exception as e:
+                    print(str(e))
+                else:
+                    break
             # entity_id, movement_id, role_id = (response.strip() + ",").replace(" ", "").split(",")[:3]
             id_list = re.findall(r'\d+', response)
             entity_id = id_list[0] if len(id_list) >= 1 else ''
@@ -133,6 +139,7 @@ for text_file in TEXT_FILES:
             chatgpt_grounding[text] = (entity_id, movement_id, role_id)
 
             if entity_id < 0 or movement_id < 0 or role_id < 0 or entity_id != entity_id_gt or movement_id != movement_id_gt or role_id != role_id_gt:
+                print()
                 print(f'response: {response}')
                 print(f'answer: {entity_id_gt}, {movement_id_gt}, {role_id_gt}')
 
