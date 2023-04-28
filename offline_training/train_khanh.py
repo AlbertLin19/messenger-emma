@@ -22,19 +22,31 @@ sys.path.append('..')
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 from messenger.models.utils import BatchedEncoder
-from offline_training.batched_world_model.model_khanh import BatchedWorldModel
+from offline_training.batched_world_model.model_khanh import WorldModel
 from dataloader import DataLoader
 from evaluator import Evaluator
 
 def train(args):
 
-    world_model = BatchedWorldModel(args).to(args.device)
+    args.loss_weights = {
+        'loc': 1,
+        'id': 1,
+        'reward': args.reward_loss_weight,
+        'done': args.done_loss_weight
+    }
+
+    world_model = WorldModel(args).to(args.device)
     print(world_model)
 
     # Text Encoder
-    encoder_model = AutoModel.from_pretrained("bert-base-uncased")
-    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-    encoder = BatchedEncoder(model=encoder_model, tokenizer=tokenizer, device=args.device, max_length=36)
+    manuals_encoder_model = AutoModel.from_pretrained("bert-base-uncased")
+    manuals_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    manuals_encoder = BatchedEncoder(
+        model=manuals_encoder_model,
+        tokenizer=manuals_tokenizer,
+        device=args.device,
+        max_length=36
+    )
 
     with open(args.dataset_path, "rb") as f:
         dataset = pickle.load(f)
@@ -78,12 +90,13 @@ def train(args):
     start_time = time.time()
 
     # load initial data
-    manuals, ground_truths, grids = train_dataloader.reset()
-    #manuals, tokens = encoder.encode(manuals)
+    manuals, true_parsed_manuals, grids = train_dataloader.reset()
+    embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
 
     # reset world_model hidden states
-    world_model.real_state_reset(tensor_grids)
+    world_model.state_reset(tensor_grids)
 
     best_metric = defaultdict(lambda: defaultdict(lambda: 1e9))
     train_metrics = defaultdict(list)
@@ -111,7 +124,7 @@ def train(args):
 
             for eval_split, eval_dataloader in eval_dataloaders.items():
 
-                eval_world_model = BatchedWorldModel(args).to(args.device)
+                eval_world_model = WorldModel(args).to(args.device)
                 eval_world_model.load_state_dict(world_model.state_dict())
 
                 with torch.no_grad():
@@ -120,7 +133,7 @@ def train(args):
                         eval_split,
                         step,
                         eval_world_model,
-                        encoder,
+                        manuals_encoder,
                         eval_dataloader,
                         best_metric[eval_split]
                     )
@@ -136,19 +149,23 @@ def train(args):
 
         # load next-step data
         old_tensor_grids = tensor_grids
-        manuals, ground_truths, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
-        #manuals, tokens = encoder.encode(manuals)
+        manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
+        embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
         tensor_rewards = torch.from_numpy(rewards).float().to(args.device)
         tensor_dones = torch.from_numpy(dones).long().to(args.device)
         tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
 
+        parsed_manuals = get_parsed_manuals(args, true_parsed_manuals)
+
         if cur_idxs.tolist():
-            world_model.real_step(
+            world_model.step(
                 old_tensor_grids,
-                manuals,
-                ground_truths,
+                embedded_manuals,
+                parsed_manuals,
+                true_parsed_manuals,
                 tensor_actions,
                 tensor_grids,
                 tensor_rewards,
@@ -160,39 +177,39 @@ def train(args):
 
         # perform update
         if step % args.update_step == 0:
-            real_grid_loss, real_reward_loss, real_done_loss, real_loss = world_model.real_loss_update()
-            train_metrics['grid_loss'].append(real_grid_loss)
-            train_metrics['reward_loss'].append(real_reward_loss)
-            train_metrics['done_loss'].append(real_done_loss)
-            train_metrics['total_loss'].append(real_loss)
+            avg_loss = world_model.loss_update()
+            for k in avg_loss:
+                train_metrics[k].append(avg_loss[k])
 
         # reset world_model hidden states for new rollouts
-        world_model.real_state_reset(tensor_grids, new_idxs)
+        world_model.state_reset(tensor_grids, new_idxs)
 
         # check if max_time has elapsed
         if time.time() - start_time > 60 * 60 * args.max_time:
             break
 
-def evaluate(args, split, step, world_model, encoder, dataloader, best_metric):
+def evaluate(args, split, step, world_model, manuals_encoder, dataloader, best_metric):
 
     world_model.eval()
 
-    manuals, ground_truths, grids, n_rollouts = dataloader.reset()
-    #manuals, tokens = encoder.encode(manuals)
+    manuals, true_parsed_manuals, grids, n_rollouts = dataloader.reset()
+    embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
 
-    world_model.real_state_reset(tensor_grids)
+    world_model.state_reset(tensor_grids)
 
     metrics = defaultdict(list)
     while True:
+
         old_tensor_grids = tensor_grids
-        (manuals, ground_truths, actions, grids, rewards, dones, (new_idxs, cur_idxs),
+        (manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs),
         timesteps, just_completes, all_complete) = dataloader.step()
 
         if all_complete:
             break
 
-        #manuals, tokens = encoder.encode(manuals)
+        embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
         tensor_rewards = torch.from_numpy(rewards).float().to(args.device)
@@ -201,90 +218,143 @@ def evaluate(args, split, step, world_model, encoder, dataloader, best_metric):
 
         if cur_idxs.tolist():
 
-            ((pred_loc_probs_by_entityid, pred_rewards, pred_done_probs),
-                (loc_probs_by_entityid, rewards, done_probs)) = world_model.real_step(
+            parsed_manuals = get_parsed_manuals(args, true_parsed_manuals)
+
+            preds, targets = world_model.step(
                 old_tensor_grids,
-                manuals,
-                ground_truths,
+                embedded_manuals,
+                parsed_manuals,
+                true_parsed_manuals,
                 tensor_actions,
                 tensor_grids,
                 tensor_rewards,
                 tensor_dones,
-                cur_idxs)
-
-            metrics['grid_loss'].extend(
-                F.cross_entropy(
-                    (pred_loc_probs_by_entityid.flatten(0, 1) + 1e-6).log(),
-                    loc_probs_by_entityid.flatten(0, 1),
-                    reduction='none'
-                ).view(-1).tolist()
+                cur_idxs
             )
 
-            for i, t in enumerate(timesteps[cur_idxs]):
-                if t <= 10:
-                    metrics['grid_loss_len_%d' % t].extend(
-                        F.cross_entropy(
-                            (pred_loc_probs_by_entityid[i] + 1e-6).log(),
-                            loc_probs_by_entityid[i],
-                            reduction='none'
-                        ).view(-1).tolist()
-                    )
-                    for tt in range(1, t + 1):
-                        metrics['grid_loss_len_upto_%d' % t].extend(
-                            F.cross_entropy(
-                                (pred_loc_probs_by_entityid[i] + 1e-6).log(),
-                                loc_probs_by_entityid[i],
-                                reduction='none'
-                            ).view(-1).tolist()
-                        )
+            add_eval_metrics(metrics, preds, targets, timesteps[cur_idxs])
 
-            metrics['reward_loss'].extend(
-                F.mse_loss(
-                    pred_rewards,
-                    rewards,
-                    reduction='none'
-                ).view(-1).tolist()
-            )
-
-            metrics['done_loss'].extend(
-                F.binary_cross_entropy(
-                    pred_done_probs,
-                    done_probs,
-                    reduction='none'
-                ).view(-1).tolist()
-            )
-
-        world_model.real_state_reset(tensor_grids, new_idxs)
+        world_model.state_reset(tensor_grids, new_idxs)
 
     avg_metric = {}
     for k in metrics:
         avg_metric[k] = np.average(metrics[k])
         if 'reward' not in k:
             avg_metric[k.replace('loss', 'perp')] = math.exp(avg_metric[k])
-    avg_metric['total_loss'] = avg_metric['grid_loss'] + avg_metric['reward_loss'] + avg_metric['done_loss']
+    avg_metric['total_loss'] = avg_metric['loc_loss'] + avg_metric['id_loss'] + avg_metric['reward_loss'] + avg_metric['done_loss']
 
     # update best model
     for k in avg_metric:
         if avg_metric[k] < best_metric[k]:
             best_metric[k] = avg_metric[k]
-            if k in ['grid_loss', 'total_loss']:
+            if k in ['loc_loss', 'id_loss', 'total_loss']:
                 model_path = os.path.join(args.output, '%s_best_%s.ckpt' % (split, k))
                 torch.save(world_model.state_dict(), model_path)
                 print('Saved best %s %s to %s' % (split, k, model_path))
 
     print('  EVALUATION on %s' % split)
+    logged_losses = ['total_loss', 'loc_loss', 'id_loss', 'reward_loss', 'done_loss']
     log_str = []
-    for k in ['total_loss', 'grid_loss', 'reward_loss', 'done_loss']:
+    for k in logged_losses:
         log_str.append('%s %.4f' % (k, avg_metric[k]))
     log_str = '    CURRENT ' + ', '.join(log_str)
     print(log_str)
     log_str = []
-    for k in ['total_loss', 'grid_loss', 'reward_loss', 'done_loss']:
+    for k in logged_losses:
         log_str.append('%s %.4f' % (k, best_metric[k]))
     log_str = '    BEST    ' + ', '.join(log_str)
     print(log_str)
 
     return avg_metric
+
+def encode_manuals(args, manuals, manuals_encoder):
+    if args.manuals == 'embed':
+        embedded_manuals, _ = manuals_encoder.encode(manuals)
+        return embedded_manuals
+    return None
+
+def get_parsed_manuals(args, true_parsed_manuals):
+    if args.manuals == 'gpt':
+        # TODO: load chatgpt-parsed manuals
+        raise NotImplementedError
+    elif args.manuals == 'oracle':
+        parsed_manuals = true_parsed_manuals
+    else:
+        parsed_manuals = None
+    return parsed_manuals
+
+def add_eval_metrics(metrics, preds, targets, timesteps):
+
+    metrics['loc_loss'].extend(
+        F.cross_entropy(
+            (preds['loc'].flatten(0, 1) + 1e-6).log(),
+            targets['loc'].flatten(0, 1),
+            reduction='none'
+        ).view(-1).tolist()
+    )
+
+    for i, t in enumerate(timesteps):
+        if t <= 10:
+            metrics['loc_loss_len_%d' % t].extend(
+                F.cross_entropy(
+                    (preds['loc'][i] + 1e-6).log(),
+                    targets['loc'][i],
+                    reduction='none'
+                ).view(-1).tolist()
+            )
+            for tt in range(1, t + 1):
+                metrics['loc_loss_len_upto_%d' % t].extend(
+                    F.cross_entropy(
+                        (preds['loc'][i] + 1e-6).log(),
+                        targets['loc'][i],
+                        reduction='none'
+                    ).view(-1).tolist()
+                )
+
+    metrics['id_loss'].extend(
+        F.cross_entropy(
+            (preds['id'].flatten(0, 1) + 1e-6).log(),
+            targets['id'].flatten(),
+            ignore_index=-1,
+            reduction='none'
+        ).view(-1).tolist()
+    )
+
+    for i, t in enumerate(timesteps):
+        if t <= 10:
+            metrics['id_loss_len_%d' % t].extend(
+                F.cross_entropy(
+                    (preds['id'][i] + 1e-6).log(),
+                    targets['id'][i],
+                    ignore_index=-1,
+                    reduction='none'
+                ).view(-1).tolist()
+            )
+            for tt in range(1, t + 1):
+                metrics['id_loss_len_upto_%d' % t].extend(
+                    F.cross_entropy(
+                        (preds['id'][i] + 1e-6).log(),
+                        targets['id'][i],
+                        ignore_index=-1,
+                        reduction='none'
+                    ).view(-1).tolist()
+                )
+
+    metrics['reward_loss'].extend(
+        F.mse_loss(
+            preds['reward'],
+            targets['reward'],
+            reduction='none'
+        ).view(-1).tolist()
+    )
+
+    metrics['done_loss'].extend(
+        F.binary_cross_entropy(
+            preds['done'],
+            targets['done'],
+            reduction='none'
+        ).view(-1).tolist()
+    )
 
 
 if __name__ == "__main__":
@@ -296,11 +366,16 @@ if __name__ == "__main__":
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
     parser.add_argument("--exp_name", type=str, help="experiment name")
 
+    # text config
+    parser.add_argument("--manuals", type=str,
+        choices=['none', 'embed', 'gpt', 'oracle'], help="which type of manuals to pass to the model")
+
     # World model arguments
     parser.add_argument("--load_model_from", default=None, help="Path to world model state dict.")
     parser.add_argument("--hidden_size", default=512, type=int, help="World model hidden size.")
     parser.add_argument('--attr_embed_dim', type=int, default=256, help='attribute embedding size')
     parser.add_argument('--action_embed_dim', type=int, default=256, help='action embedding size')
+    parser.add_argument('--keep_entity_features_for_parsed_manuals', type=int, default=0)
 
     parser.add_argument("--learning_rate", default=0.0001, type=float, help="World model learning rate.")
     parser.add_argument("--weight_decay", default=0, type=float, help="World model weight decay.")
@@ -324,7 +399,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_frames', default=64, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
-    parser.add_argument('--use_wandb', type=int, default=1, help='log to wandb?')
+    parser.add_argument('--use_wandb', type=int, default=0, help='log to wandb?')
 
     args = parser.parse_args()
 

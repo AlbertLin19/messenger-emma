@@ -7,7 +7,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
-from offline_training.batched_world_model.modules import BatchedEncoder, BatchedDecoder
+from offline_training.batched_world_model.modules import ResNetEncoder, ResNetDecoder
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 from messenger.envs.config import NPCS, NO_MESSAGE, WITH_MESSAGE
@@ -26,150 +26,143 @@ ROLE_TYPES = {
 
 ROLE_ORDER = ['enemy', 'message', 'goal']
 
-class MyGroupNorm(nn.Module):
+H = 10
+W = 10
+GRID_CHANNELS = 4
+NUM_ENTITIES = 17
 
-    # num_channels: num_groups
-    GROUP_NORM_LOOKUP = {
-        16: 2,  # -> channels per group: 8
-        32: 4,  # -> channels per group: 8
-        64: 8,  # -> channels per group: 8
-        128: 8,  # -> channels per group: 16
-        256: 16,  # -> channels per group: 16
-        320: 16,  # -> channels per group: 16
-        512: 32,  # -> channels per group: 16
-        640: 32,  # -> channels per group: 16
-        1024: 32,  # -> channels per group: 32
-        2048: 32,  # -> channels per group: 64
-    }
 
-    def __init__(self, num_channels):
-        super(MyGroupNorm, self).__init__()
-        self.norm = nn.GroupNorm(num_groups=self.GROUP_NORM_LOOKUP[num_channels],
-                                 num_channels=num_channels)
+class WorldModelBase(nn.Module):
 
-    def forward(self, x):
-        x = self.norm(x)
-        return x
+    def _select(self, embed, x):
+        # Work around slow backward pass of nn.Embedding, see
+        # https://github.com/pytorch/pytorch/issues/24912
+        out = embed.weight.index_select(0, x.reshape(-1))
+        return out.reshape(x.shape + (-1,))
 
-def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, padding: int = 1) -> nn.Conv2d:
-    """3x3 convolution with padding"""
-    return nn.Conv2d(
-        in_planes,
-        out_planes,
-        kernel_size=3,
-        stride=stride,
-        padding=padding,
-        groups=groups,
-        bias=False,
-    )
+    def loc_loss(self, logits, targets):
+        logits = logits.view(-1, logits.shape[-1])
+        targets  = targets.view(-1, targets.shape[-1])
+        loss = F.cross_entropy(logits, targets, reduction='sum') / (self.batch_size * GRID_CHANNELS)
+        return loss
 
-def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
-    """1x1 convolution"""
-    return nn.Conv2d(in_planes, out_planes, kernel_size=1)
+    def id_loss(self, logits, targets):
 
-# from https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py#L2
-class BasicBlock(nn.Module):
-    expansion = 1
+        if self.manuals in ['gpt', 'oracle']:
+            normalizer = self.batch_size
+        else:
+            normalizer = self.batch_size * GRID_CHANNELS
 
-    def __init__(
-        self,
-        inplanes,
-        planes,
-        stride=1,
-        downsample=None,
-        groups=1,
-        base_width=64,
-        padding=1,
-        dilation=0,
-        norm_layer=None,
-    ) -> None:
-        super().__init__()
-        if norm_layer is None:
-            norm_layer = nn.BatchNorm2d
-        if groups != 1 or base_width != 64:
-            raise ValueError("BasicBlock only supports groups=1 and base_width=64")
-        if dilation > 1:
-            raise NotImplementedError("Dilation > 1 not supported in BasicBlock")
-        # Both self.conv1 and self.downsample layers downsample the input when stride != 1
-        self.conv1 = conv3x3(inplanes, planes, stride, padding=padding)
-        self.bn1 = norm_layer(planes)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv2 = conv3x3(planes, planes, padding=padding)
-        self.bn2 = norm_layer(planes)
-        self.downsample = downsample
-        self.stride = stride
+        logits = logits.view(-1, logits.shape[-1])
+        targets = targets.view(-1)
 
-    def forward(self, x):
-        identity = x
+        loss = F.cross_entropy(
+            logits,
+            targets,
+            ignore_index=-1,
+            reduction='sum'
+        ) / normalizer
 
-        out = self.conv1(x)
-        out = self.bn1(out)
-        out = self.relu(out)
+        return loss
 
-        out = self.conv2(out)
-        out = self.bn2(out)
+    def reward_loss(self, preds, targets):
+        return F.mse_loss(preds, targets, reduction='sum') / self.batch_size
 
-        if self.downsample is not None:
-            identity = self.downsample(x)
+    def done_loss(self, logits, targets):
+        return F.binary_cross_entropy_with_logits(logits, targets, reduction='sum') / self.batch_size
 
-        out += identity
-        out = self.relu(out)
+    # reset hidden states for real prediction
+    def state_reset(self, init_grids, idxs=None):
+        if idxs is None:
+            self.hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
+            self.cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
+        else:
+            self.hidden_states[:, idxs] = 0
+            self.cell_states[:, idxs] = 0
 
-        return out
+    # detach hidden states for real prediction
+    def state_detach(self):
+        self.hidden_states = self.hidden_states.detach()
+        self.cell_states = self.cell_states.detach()
 
-class BatchedWorldModel(nn.Module):
+    # update model via real loss
+    def loss_update(self):
+        self.optimizer.zero_grad()
+        total_loss = 0
+        for k in self.loss:
+            total_loss += self.loss[k] * self.loss_weight[k]
+        total_loss.backward()
+        self.optimizer.step()
+
+        #print(total_loss.item() / self.backprop_count)
+
+        loss_values = self.loss_reset()
+        self.state_detach()
+
+        return loss_values
+
+    # reset real loss
+    def loss_reset(self):
+        with torch.no_grad():
+            avg_loss = {}
+            avg_loss['total'] = 0
+            for k in self.loss:
+                avg_loss[k] = self.loss[k].item() / self.backprop_count
+                avg_loss['total'] += avg_loss[k] * self.loss_weight[k]
+
+        for k in self.loss:
+            self.loss[k] = 0
+
+        self.backprop_count = 0
+
+        return avg_loss
+
+    def predict_grid(self, preds, sample=False):
+
+        grids = torch.zeros((preds['loc'].shape[0], H, W, GRID_CHANNELS)).to(self.device)
+        if sample:
+            loc_dists = torch.distributions.Categorical(probs=preds['loc'])
+            locs = loc_dists.sample()
+            id_dists = torch.distributions.Categorical(probs=preds['id'])
+            ids = id_dists.sample()
+        else:
+            _, locs = preds['loc'].max(-1)
+            _, ids = preds['id'].max(-1)
+
+        grids = F.one_hot(locs, num_classes=H * W + 1)
+        grids = grids[...,:-1]
+        grids = grids.view(grids.shape[0], grids.shape[1], H,  W)
+
+        ids = ids.view(ids.shape[0], ids.shape[1], 1, 1).repeat(1, 1, H, W)
+        grids = grids * ids
+        # b x c x h x w --> b x h x w x c
+        grids = grids.permute((0, 2, 3, 1))
+
+        return grids
+
+
+class WorldModel(WorldModelBase):
 
     def __init__(self, args):
 
         super().__init__()
 
-        self.grid_channels = 5
         self.batch_size = args.batch_size
         self.device = args.device
+        self.manuals = args.manuals
+        self.keep_entity_features_for_parsed_manuals = args.keep_entity_features_for_parsed_manuals
 
         self.hidden_size = hidden_size = args.hidden_size
-        attr_embed_dim = args.attr_embed_dim
+        self.attr_embed_dim = attr_embed_dim = args.attr_embed_dim
         action_embed_dim = args.action_embed_dim
 
+        self.pos_embeddings = nn.Embedding(GRID_CHANNELS, attr_embed_dim)
+        self.id_embeddings = nn.Embedding(NUM_ENTITIES, attr_embed_dim, padding_idx=0)
         self.role_embeddings = nn.Embedding(len(ROLE_TYPES) + 2, attr_embed_dim)
         self.movement_embeddings = nn.Embedding(len(MOVEMENT_TYPES) + 2, attr_embed_dim)
 
-        conv_params = {
-            'kernel': [3, 3, 3],
-            'stride': [1, 2, 2],
-            'padding': [2, 1, 1],
-            'in_channels' : [attr_embed_dim, 64, 64],
-            'hidden_channels' : [64, 64, 64],
-            'out_channels' : [64, 64, 64],
-        }
-        F = conv_params['kernel']
-        S = conv_params['stride']
-        P = conv_params['padding']
-        in_channels = conv_params['in_channels']
-        out_channels = conv_params['out_channels']
-        hidden_channels = conv_params['hidden_channels']
+        self.encoder = ResNetEncoder(attr_embed_dim)
 
-        encoder_layers = [
-            nn.Sequential(
-                nn.Conv2d(
-                    in_channels=in_channels[i],
-                    out_channels=hidden_channels[i],
-                    kernel_size=F[i],
-                    stride=S[i],
-                    padding=P[i],
-                ),
-                nn.ReLU(),
-                BasicBlock(
-                    inplanes=hidden_channels[i],
-                    planes=out_channels[i],
-                    padding=1,
-                    norm_layer=MyGroupNorm,
-                    downsample=nn.Conv2d(hidden_channels[i], out_channels[i], 1)
-                )
-            )
-            for i in range(len(in_channels))
-        ]
-        self.encoder = nn.Sequential(*encoder_layers)
         test_in = torch.zeros((1, attr_embed_dim, 10, 10))
         test_out = self.encoder(test_in)
         self.after_encoder_shape = test_out.shape
@@ -191,48 +184,27 @@ class BatchedWorldModel(nn.Module):
             nn.Linear(hidden_size, enc_dim),
             nn.ReLU()
         )
-        decoder_layers = [
-            nn.Sequential(
-                nn.ConvTranspose2d(
-                    in_channels=out_channels[i],
-                    out_channels=hidden_channels[i],
-                    kernel_size=F[i],
-                    stride=S[i],
-                    padding=P[i],
-                    output_padding=1 if S[i] > 1 else 0
-                ),
-                nn.ReLU(),
-                BasicBlock(
-                    inplanes=hidden_channels[i],
-                    planes=in_channels[i],
-                    padding=1,
-                    norm_layer=MyGroupNorm,
-                    downsample=nn.Conv2d(hidden_channels[i], in_channels[i], 1)
-                )
-            )
-            for i in reversed(range(len(in_channels)))
-        ]
 
-        self.decoder = nn.Sequential(
-            *decoder_layers,
+        self.location_head = ResNetDecoder(attr_embed_dim, GRID_CHANNELS)
+
+        self.id_head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Conv2d(
-                in_channels=in_channels[0],
-                out_channels=self.grid_channels,
-                kernel_size=1
-            )
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, GRID_CHANNELS * NUM_ENTITIES)
         )
 
         nonexistence_layers = [
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU()
         ]
-        for _ in range(len(in_channels) - 1):
+        for _ in range(self.encoder.num_layers - 1):
             nonexistence_layers.extend([
                 nn.Linear(hidden_size, hidden_size),
                 nn.ReLU()
             ])
-        nonexistence_layers.append(nn.Linear(hidden_size, self.grid_channels))
+        nonexistence_layers.append(nn.Linear(hidden_size, GRID_CHANNELS))
         self.nonexistence_head = nn.Sequential(*nonexistence_layers)
 
         self.reward_head = nn.Sequential(
@@ -255,10 +227,15 @@ class BatchedWorldModel(nn.Module):
         self.done_loss_weight = args.done_loss_weight
 
         # loss accumulation
-        self.real_grid_loss_total = 0
-        self.real_reward_loss_total = 0
-        self.real_done_loss_total = 0
-        self.real_backprop_count = 0
+        self.loss = {
+            'loc': 0,
+            'id': 0,
+            'reward': 0,
+            'done': 0
+        }
+        self.loss_weight = args.loss_weights
+        self.id_class_count = [1] * NUM_ENTITIES
+        self.backprop_count = 0
 
     def _select(self, embed, x):
         # Work around slow backward pass of nn.Embedding, see
@@ -266,16 +243,18 @@ class BatchedWorldModel(nn.Module):
         out = embed.weight.index_select(0, x.reshape(-1))
         return out.reshape(x.shape + (-1,))
 
-    def forward(self, grids, manuals, ground_truths, actions, lstm_states):
-
+    def embed_grids_with_parsed_manuals(self, grids, parsed_manuals):
+        positions = []
         movements = []
         roles = []
-        for triplet in ground_truths:
-            movements.append([MOVEMENT_TYPES[e[1]] for e in triplet] + [3, 4])
-            roles.append([ROLE_TYPES[e[2]] for e in triplet] + [3, 4])
+        for triplet in parsed_manuals:
+            movements.append([MOVEMENT_TYPES[e[1]] if e is not None else 4 for e in triplet] + [3])
+            roles.append([ROLE_TYPES[e[2]] if e is not None else 4 for e in triplet] + [3])
+            positions.append([0, 1, 2, 3])
 
         movements = torch.tensor(movements).to(self.device)
         roles = torch.tensor(roles).to(self.device)
+        positions = torch.tensor(positions).to(self.device)
 
         b, h, w, c = grids.shape
         movements = movements.view(b, 1, 1, c).repeat(1, h, w, 1)
@@ -284,17 +263,64 @@ class BatchedWorldModel(nn.Module):
         roles = roles.view(b, 1, 1, c).repeat(1, h, w, 1)
         roles_embed = self._select(self.role_embeddings, roles)
 
-        mask = grids.view(b, h, w, c, 1).repeat(1, 1, 1, 1, movements_embed.shape[-1])
+        positions = positions.view(b, 1, 1, c).repeat(1, h, w, 1)
+        positions_embed = self._select(self.pos_embeddings, positions)
+
+        mask = (grids > 0).float().unsqueeze(-1)
         # b x h x w x c x embed_dim
         movements_embed = movements_embed * mask
         roles_embed = roles_embed * mask
+        positions_embed = positions_embed * mask
+
         # b x h x w x embed_dim
         movements_embed = movements_embed.sum(dim=-2)
         roles_embed = roles_embed.sum(dim=-2)
+        positions_embed = positions_embed.sum(dim=-2)
+
+        # b x embed_dim x h x w
         movements_embed = movements_embed.permute((0, 3, 1, 2))
         roles_embed = roles_embed.permute((0, 3, 1, 2))
+        positions_embed = positions_embed.permute((0, 3, 1, 2))
 
-        grids_embed = movements_embed + roles_embed
+        # zero out entity ids in the first 3 channels
+        grid_ids = grids.clone().long()
+        if not self.keep_entity_features_for_parsed_manuals:
+            grid_ids[..., :-1][grid_ids[..., :-1] > 0] = 0
+        # b x h x w x c x embed_dim
+        ids_embed = self._select(self.id_embeddings, grid_ids)
+        # b x embed_dim x h x w
+        ids_embed = ids_embed.sum(dim=-2)
+        # b x embed_dim x h x w
+        ids_embed = ids_embed.permute((0, 3, 1, 2))
+
+        return roles_embed + movements_embed + positions_embed + ids_embed
+
+    def embed_grids_without_manuals(self, grids):
+
+        b, h, w, c = grids.shape
+        positions = torch.arange(0, 4).to(self.device)
+        positions = positions.view(1, 1, 1, c).repeat(b, h, w, 1)
+        positions_embed = self._select(self.pos_embeddings, positions)
+        mask = (grids > 0).float().unsqueeze(-1)
+        positions_embed = positions_embed * mask
+        positions_embed = positions_embed.sum(dim=-2)
+        positions_embed = positions_embed.permute((0, 3, 1, 2))
+
+        ids_embed = self._select(self.id_embeddings, grids.long())
+        ids_embed = ids_embed.sum(dim=-2)
+        ids_embed = ids_embed.permute((0, 3, 1, 2))
+
+        return positions_embed + ids_embed
+
+
+    def forward(self, grids, embedded_manuals, parsed_manuals, actions, lstm_states):
+
+        if self.manuals in ['gpt', 'oracle']:
+            grids_embed = self.embed_grids_with_parsed_manuals(grids, parsed_manuals)
+        elif self.manuals == 'none':
+            grids_embed = self.embed_grids_without_manuals(grids)
+        else:
+            raise NotImplementedError
 
         latents = self.encoder(grids_embed)
         latents = self.before_lstm_projector(latents)
@@ -305,179 +331,134 @@ class BatchedWorldModel(nn.Module):
         mem_outs, (hidden_states, cell_states) = self.lstm(mem_ins, lstm_states)
         mem_outs = mem_outs.squeeze(0)
 
-        decoder_inps = self.after_lstm_projector(mem_outs)
-        decoder_inps = decoder_inps.view(decoder_inps.shape[0], *self.after_encoder_shape[1:])
+        logits= {}
 
-        pred_grid_logits = self.decoder(decoder_inps)
-        pred_nonexistence_logits = self.nonexistence_head(mem_outs)
+        loc_inps = self.after_lstm_projector(mem_outs)
+        loc_inps = loc_inps.view(loc_inps.shape[0], *self.after_encoder_shape[1:])
+        logits['grid'] = self.location_head(loc_inps)
+        logits['nonexistence'] = self.nonexistence_head(mem_outs)
 
-        pred_rewards = self.reward_head(mem_outs)
-        pred_done_logits = self.done_head(mem_outs)
+        logits['id'] = self.id_head(mem_outs)
+        logits['id'] = logits['id'].view(logits['id'].shape[0], GRID_CHANNELS, NUM_ENTITIES)
 
-        return (pred_grid_logits, pred_nonexistence_logits, pred_rewards, pred_done_logits), (hidden_states, cell_states)
+        logits['reward'] = self.reward_head(mem_outs)
+        logits['done'] = self.done_head(mem_outs)
 
-    def create_loc_logits_and_probs(self, grid_logits, nonexistence_logits, grid_probs):
+        return logits, (hidden_states, cell_states)
+
+    def create_loc_logits_and_targets(self, grid_logits, nonexistence_logits, grids):
+
         grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
         nonexistence_logits = nonexistence_logits.unsqueeze(-1)
         location_logits = torch.cat((grid_logits, nonexistence_logits), dim=-1)
 
-        grid_probs = grid_probs.permute((0, 3, 1, 2))
-        grid_probs = grid_probs.view(grid_probs.shape[0], grid_probs.shape[1], -1)
-        nonexistence_probs = (1. - grid_probs.sum(dim=-1)).unsqueeze(-1)
-        location_probs = torch.cat((grid_probs, nonexistence_probs), dim=-1)
+        grid_targets = (grids.permute((0, 3, 1, 2)) > 0).float()
+        grid_targets = grid_targets.view(grid_targets.shape[0], grid_targets.shape[1], -1)
+        nonexistence_targets = (1. - grid_targets.sum(dim=-1)).unsqueeze(-1)
+        location_targets = torch.cat((grid_targets, nonexistence_targets), dim=-1)
 
-        return location_logits, location_probs
+        return location_logits, location_targets
 
-    def grid_loss(self, location_logits, location_probs):
-        location_logits = location_logits.view(-1, location_logits.shape[-1])
-        location_probs  = location_probs.view(-1, location_probs.shape[-1])
-        loss = F.cross_entropy(location_logits, location_probs, reduction='sum') / (self.batch_size * self.grid_channels)
-        return loss
+    def create_id_logits_and_targets(self, id_logits, grids, true_parsed_manuals):
+        id_targets = torch.zeros((id_logits.shape[0], GRID_CHANNELS), device=self.device).long()
+        for i, triplet in enumerate(true_parsed_manuals):
+            for j, e in enumerate(triplet):
+                id_targets[i, j] = ENTITY_IDS[e[0]] if e is not None else 0
+            avatar_id = grids[i, :, :, 3].view(-1).max().item()
+            id_targets[i, 3] = avatar_id
 
-    def reward_loss(self, pred_rewards, rewards):
-        return F.mse_loss(pred_rewards, rewards, reduction='sum') / self.batch_size
+        if self.manuals in ['gpt', 'oracle']:
+            # only predict id of avatar
+            id_targets[:, :3] = -1
 
-    def done_loss(self, pred_done_logits, done_probs):
-        return F.binary_cross_entropy_with_logits(pred_done_logits, done_probs, reduction='sum') / self.batch_size
+        return id_logits, id_targets
 
-    # reset hidden states for real prediction
-    def real_state_reset(self, init_grids, idxs=None):
-        if idxs is None:
-            self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
-            self.real_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
-        else:
-            self.real_hidden_states[:, idxs] = 0
-            self.real_cell_states[:, idxs] = 0
-
-    # detach hidden states for real prediction
-    def real_state_detach(self):
-        self.real_hidden_states = self.real_hidden_states.detach()
-        self.real_cell_states = self.real_cell_states.detach()
-
-    def reorder_ground_truths(self, ground_truths):
-        new_ground_truths = []
-        for i, triplet in enumerate(ground_truths):
+    def reorder_parsed_manuals(self, parsed_manuals, grids):
+        b, h, w, c = grids.shape
+        entity_per_channel, _ = grids[...,:-1].flatten(1, 2).max(1)
+        new_parsed_manuals = []
+        #print(ENTITY_IDS)
+        for i, triplet in enumerate(parsed_manuals):
+            #print(i, triplet, entity_per_channel[i])
             new_triplet = []
-            for r in ROLE_ORDER:
+            for r in entity_per_channel[i].tolist():
+                if r == 0:
+                    new_triplet.append(None)
+                    continue
                 for e in triplet:
-                    if e[2] == r:
+                    if ENTITY_IDS[e[0]] == r:
                         new_triplet.append(e)
                         break
-            new_ground_truths.append(new_triplet)
-        return new_ground_truths
+            #print(new_triplet)
+            assert len(new_triplet) == 3
+            new_parsed_manuals.append(new_triplet)
+        return new_parsed_manuals
 
-    def reformat_grids(self, grids):
-        b, h, w, c = grids.shape
-        new_grids = torch.zeros((b, h, w, self.grid_channels), device=self.device)
-        for i in range(3):
-            new_grids[..., i] = (grids[..., i] > 0).float()
-        new_grids[..., 3] = (grids[..., 3] == NO_MESSAGE.id).float()
-        new_grids[..., 4] = (grids[..., 3] == WITH_MESSAGE.id).float()
-        return new_grids
-
-    def probs_to_probs_by_entityid(self, probs, ground_truths):
-        b, c, n = probs.shape
-        probs_by_entityid = torch.zeros((b, 17, n), device=self.device)
-        # default: no entities exist
-        probs_by_entityid[:, :, -1] = 1
-        for i, triplet in enumerate(ground_truths):
-            for j, e in enumerate(triplet):
-                e_id = ENTITY_IDS[e[0]]
-                probs_by_entityid[i, e_id] = probs[i, j]
-            probs_by_entityid[i, NO_MESSAGE.id] = probs[i, 3]
-            probs_by_entityid[i, WITH_MESSAGE.id] = probs[i, 4]
-        return probs_by_entityid
-
-
-    # make real prediction and accumulate real loss
-    def real_step(self,
+    def step(self,
             old_grids,
-            manuals,
-            ground_truths,
+            embedded_manuals,
+            parsed_manuals,
+            true_parsed_manuals,
             actions,
             grids,
             rewards,
             dones,
             backprop_idxs):
 
-        ground_truths = self.reorder_ground_truths(ground_truths)
-        old_grids = self.reformat_grids(old_grids)
-        grids = self.reformat_grids(grids)
-        done_probs = dones.float()
 
-        ((pred_grid_logits, pred_nonexistence_logits, pred_rewards, pred_done_logits),
-        (self.real_hidden_states, self.real_cell_states)) = \
-            self.forward(
-                    old_grids,
-                    manuals,
-                    ground_truths,
-                    actions,
-                    (self.real_hidden_states, self.real_cell_states),
-            )
+        if parsed_manuals is not None:
+            parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, grids)
+        true_parsed_manuals = self.reorder_parsed_manuals(true_parsed_manuals, grids)
 
-        ground_truths = [ground_truths[i] for i in backprop_idxs.tolist()]
-        pred_grid_logits = pred_grid_logits[backprop_idxs]
-        pred_nonexistence_logits = pred_nonexistence_logits[backprop_idxs]
-        pred_rewards = pred_rewards[backprop_idxs]
-        pred_done_logits = pred_done_logits[backprop_idxs]
-        grids = grids[backprop_idxs]
-        rewards = rewards[backprop_idxs]
-        done_probs = done_probs[backprop_idxs]
-
-        pred_loc_logits, loc_probs = self.create_loc_logits_and_probs(
-            pred_grid_logits,
-            pred_nonexistence_logits,
-            grids
+        logits, (self.hidden_states, self.cell_states) = self.forward(
+            old_grids,
+            embedded_manuals,
+            parsed_manuals,
+            actions,
+            (self.hidden_states, self.cell_states),
         )
-        pred_loc_probs = pred_loc_logits.softmax(dim=-1)
 
-        self.real_grid_loss_total += self.grid_loss(pred_loc_logits, loc_probs)
-        self.real_reward_loss_total += self.reward_loss(pred_rewards, rewards)
-        self.real_done_loss_total += self.done_loss(pred_done_logits, done_probs)
+        # select examples that need backprop
+        if parsed_manuals is not None:
+            parsed_manuals = [parsed_manuals[i] for i in backprop_idxs]
+        true_parsed_manuals = [true_parsed_manuals[i] for i in backprop_idxs]
+        for k in logits:
+            logits[k] = logits[k][backprop_idxs]
 
-        self.real_backprop_count += 1
+        targets = {}
+        targets['grid'] = grids[backprop_idxs]
+        logits['loc'], targets['loc'] = self.create_loc_logits_and_targets(
+            logits['grid'],
+            logits['nonexistence'],
+            targets['grid']
+        )
+        logits['id'], targets['id'] = self.create_id_logits_and_targets(
+            logits['id'],
+            grids,
+            true_parsed_manuals
+        )
+        targets['reward'] = rewards[backprop_idxs]
+        targets['done'] = dones[backprop_idxs].float()
+
+        for k in targets:
+            if k == 'grid':
+                continue
+            self.loss[k] += getattr(self, k + '_loss')(logits[k], targets[k])
+
+        self.backprop_count += 1
 
         with torch.no_grad():
-            pred_loc_probs_by_entityid = self.probs_to_probs_by_entityid(pred_loc_probs, ground_truths)
-            loc_probs_by_entityid = self.probs_to_probs_by_entityid(loc_probs, ground_truths)
-            pred_done_probs = torch.sigmoid(pred_done_logits)
+            preds = {}
+            preds['loc'] = logits['loc'].softmax(dim=-1)
+            preds['reward'] = logits['reward'].detach()
+            preds['done'] = torch.sigmoid(logits['done'])
+            preds['id'] = logits['id'].softmax(dim=-1)
+            # oracle or gpt manuals: use parsed_manuals to overwrite id predictions
+            if parsed_manuals is not None:
+                for i, triplet in enumerate(parsed_manuals):
+                    for j, e in enumerate(triplet):
+                        preds['id'][i, j] = 0
+                        preds['id'][i, j, 0 if e is None else ENTITY_IDS[e[0]]] = 1.
+                preds['grid'] = self.predict_grid(preds)
 
-        return (pred_loc_probs_by_entityid, pred_rewards, pred_done_probs), (loc_probs_by_entityid, rewards, done_probs)
-
-    # update model via real loss
-    def real_loss_update(self):
-        self.optimizer.zero_grad()
-        real_loss_total = self.real_grid_loss_total + \
-            self.reward_loss_weight * self.real_reward_loss_total + \
-            self.done_loss_weight * self.real_done_loss_total
-        real_loss_total.backward()
-        self.optimizer.step()
-
-        loss_values = self.real_loss_reset()
-        self.real_state_detach()
-
-        return loss_values
-
-
-
-    # reset real loss
-    def real_loss_reset(self):
-        with torch.no_grad():
-            real_grid_loss_mean = self.real_grid_loss_total / self.real_backprop_count
-            real_reward_loss_mean = self.real_reward_loss_total / self.real_backprop_count
-            real_done_loss_mean = self.real_done_loss_total / self.real_backprop_count
-            real_loss_mean = (self.real_grid_loss_total + \
-                    self.reward_loss_weight * self.real_reward_loss_total + \
-                    self.done_loss_weight * self.real_done_loss_total) / self.real_backprop_count
-
-        self.real_grid_loss_total = 0
-        self.real_reward_loss_total = 0
-        self.real_done_loss_total = 0
-        self.real_backprop_count = 0
-
-        return real_grid_loss_mean.item(), \
-               real_reward_loss_mean.item(), \
-               real_done_loss_mean.item(), \
-               real_loss_mean.item()
-
-
+        return preds, targets
