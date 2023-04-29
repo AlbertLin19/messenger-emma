@@ -282,8 +282,8 @@ class WorldModel(WorldModelBase):
         roles_embed = roles_embed.permute((0, 3, 1, 2))
         positions_embed = positions_embed.permute((0, 3, 1, 2))
 
-        # zero out entity ids in the first 3 channels
         grid_ids = grids.clone().long()
+        # zero out entity ids in the first 3 channels
         if not self.keep_entity_features_for_parsed_manuals:
             grid_ids[..., :-1][grid_ids[..., :-1] > 0] = 0
         # b x h x w x c x embed_dim
