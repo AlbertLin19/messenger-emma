@@ -399,7 +399,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_frames', default=64, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
-    parser.add_argument('--use_wandb', type=int, default=0, help='log to wandb?')
+    parser.add_argument('--use_wandb', type=int, default=1, help='log to wandb?')
 
     args = parser.parse_args()
 

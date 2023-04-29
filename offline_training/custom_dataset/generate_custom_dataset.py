@@ -78,18 +78,129 @@ CUSTOM_TO_MESSENGER_ENTITY = {
     "sword": "sword",
 }
 
+INTENTIONS = ['random', 'survive', 'get_message', 'go_to_goal']
+
+actions = [(0, -1, 0), (1, 1, 0), (2, 0, -1), (3, 0, 1), (4, 0, 0)]
+
+def get_avatar_id(obs):
+    return obs[..., -1].max()
+
+def get_entity_id_by_role(parsed_manuals, role):
+    for e in parsed_manuals:
+        if e[2] == role:
+            return ENTITY_IDS[CUSTOM_TO_MESSENGER_ENTITY[e[0]]]
+    return None
+
+def get_position_by_id(obs, id):
+    entity_ids = obs.reshape(100, -1).max(0).tolist()
+    c = entity_ids.index(id)
+    pos = obs.reshape(100, -1)[:, c].tolist().index(id)
+    row = pos // 10
+    col = pos % 10
+    return row, col
+
+def out_of_bounds(x):
+    return x[0] < 0 or x[0] >= 10 or x[1] < 0 or x[1] >= 10
+
+def get_distance(x, y):
+    return abs(x[0] - y[0]) + abs(x[1] - y[1])
+
+def get_best_action_for_chasing(a_pos, t_pos):
+    best_d = 1e9
+    best_a = None
+    # shuffle action order to randomize choice
+    for a, dr, dc in random.sample(actions, len(actions)):
+        na_pos = (a_pos[0] + dr, a_pos[1] + dc)
+        if out_of_bounds(na_pos):
+            continue
+        d = get_distance(na_pos, t_pos)
+        if d < best_d:
+            best_d = d
+            best_a = a
+    return best_a
+
+def get_best_action_for_surviving(a_pos, e_pos, g_pos):
+    distance_to_enemy = get_distance(a_pos, e_pos)
+    if g_pos is not None:
+        distance_to_goal = get_distance(a_pos, g_pos)
+    else:
+        distance_to_goal = 1e9
+    # if far enough from enemy and goal just act randomly
+    SAFE_DISTANCE = 6
+    if distance_to_enemy >= SAFE_DISTANCE and distance_to_goal >= SAFE_DISTANCE:
+        return random.choice(range(len(actions)))
+    # otherwise, stay further from both
+    best_d = -1e9
+    best_a = None
+    # shuffle action order to randomize choice
+    for a, dr, dc in random.sample(actions, len(actions)):
+        na_pos = (a_pos[0] + dr, a_pos[1] + dc)
+        if out_of_bounds(na_pos):
+            continue
+        d = get_distance(na_pos, e_pos)
+        if g_pos is not None:
+            d = min(d, get_distance(na_pos, g_pos))
+        if d >= SAFE_DISTANCE / 2 or d > best_d:
+            best_d = d
+            best_a = a
+
+    return best_a
+
+def choose_action(obs, parsed_manuals, intention):
+
+    if intention == 'random':
+        return random.choice(range(5))
+
+    if intention == 'survive':
+        avatar_id = get_avatar_id(obs)
+        a_pos = get_position_by_id(obs, avatar_id)
+        enemy_id = get_entity_id_by_role(parsed_manuals, 'enemy')
+        e_pos = get_position_by_id(obs, enemy_id)
+        goal_id = get_entity_id_by_role(parsed_manuals, 'goal')
+        g_pos = get_position_by_id(obs, goal_id)
+        # if messaged has been obtained, don't care about hitting goal
+        if avatar_id == WITH_MESSAGE.id:
+            g_pos = None
+        # choose action that takes avatar furthest from the enemy
+        return get_best_action_for_surviving(a_pos, e_pos, g_pos)
+
+    if intention == 'get_message':
+        avatar_id = get_avatar_id(obs)
+        # if message has been obtained, act randomly
+        if avatar_id == WITH_MESSAGE.id:
+            return choose_action(obs, parsed_manuals, 'random')
+        a_pos = get_position_by_id(obs, avatar_id)
+        message_id = get_entity_id_by_role(parsed_manuals, 'message')
+        t_pos = get_position_by_id(obs, message_id)
+        # choose action that takes avatar closest to the goal
+        return get_best_action_for_chasing(a_pos, t_pos)
+
+    if intention == 'go_to_goal':
+        avatar_id = get_avatar_id(obs)
+        a_pos = get_position_by_id(obs, avatar_id)
+        # if message has been obtained, go to goal
+        if avatar_id == WITH_MESSAGE.id:
+            goal_id = get_entity_id_by_role(parsed_manuals, 'goal')
+            t_pos = get_position_by_id(obs, goal_id)
+        # else go to message
+        else:
+            message_id = get_entity_id_by_role(parsed_manuals, 'message')
+            t_pos = get_position_by_id(obs, message_id)
+        # choose action that takes avatar closest to the goal or message
+        return get_best_action_for_chasing(a_pos, t_pos)
+
+    return None
+
 def wrap_obs(obs, entity_order):
     """ Convert obs format returned by gym env (dict) to a numpy array expected by model
     """
-
     obs['entities'] = obs['entities'][..., entity_order]
-
     return np.concatenate((obs["entities"], obs["avatar"]), axis=-1)
 
 random.seed(23)
 np.random.seed(23)
 
-SAVE_PATH = "./dataset_shuffle_10k_train_500_eval.pickle"
+SAVE_PATH = "./dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle"
 SPLITS_PATH = "./splits.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
@@ -127,18 +238,6 @@ role_order = {
 }
 
 for split, games in splits.items():
-    combos = set()
-    for g in games:
-        g = sorted(g, key=lambda e: role_order[e[2]])
-        movement_combo = tuple(e[1] for e in g)
-        combos.add(movement_combo)
-    print(split, len(combos))
-    pprint(sorted(combos))
-
-
-pprint(ENTITY_IDS)
-
-for split, games in splits.items():
     print(split)
     manual_idxs = []
     ground_truth_idxs = []
@@ -159,14 +258,6 @@ for split, games in splits.items():
 
             obs, manual, ground_truth = env.reset(split=split, entities=games[i])
 
-            """
-            print(ENTITY_IDS)
-            print(obs['entities'].reshape(100, 3).max(0))
-            print(ground_truth)
-            print(manual)
-            print()
-            """
-
             # permute observation channels in a consistent order across an episode
             entity_order = np.random.permutation(3)
 
@@ -176,35 +267,26 @@ for split, games in splits.items():
 
             obs = wrap_obs(obs, entity_order)
 
-            """
-            print(ENTITY_IDS)
-            print(entity_order)
-            print(obs.reshape(100, 4).max(0))
-            print(ground_truth)
-            print(manual)
-            print()
-            """
-
             manual_idx = [texts[ground_truth[j][0]][ground_truth[j][1]][ground_truth[j][2]][split].index(manual[j]) for j in range(len(manual))]
             ground_truth_idx = [(keys['entities'].index(ground_truth[j][0]), keys['dynamics'].index(ground_truth[j][1]), keys['roles'].index(ground_truth[j][2])) for j in range(len(ground_truth))]
 
             manual_idxs.append(manual_idx)
             ground_truth_idxs.append(ground_truth_idx)
 
-            #print(manual_idx, ground_truth_idx)
-
             grid_sequence = [obs]
             action_sequence = [0]
             reward_sequence = [0]
             done_sequence = [False]
 
+            # choose an intention for the episode
+            episode_intention = random.choice(INTENTIONS)
             done = False
             step = 1
             while not done:
                 if step >= MAX_ROLLOUT_LENGTH:
                     break
                 step += 1
-                action = random.choice(range(5))
+                action = choose_action(obs, ground_truth, episode_intention)
                 obs, reward, done, _ = env.step(action)
                 obs = wrap_obs(obs, entity_order)
                 grid_sequence.append(obs)
@@ -212,12 +294,6 @@ for split, games in splits.items():
                 reward_sequence.append(reward)
                 done_sequence.append(done)
 
-                #print(obs[..., 0].sum(), obs[..., 1].sum(), obs[..., 2].sum())
-
-                #print(step, action, reward, done)
-                #print(obs.sum(-1))
-                #print()
-                #input()
                 if reward != 0:
                     count_rewards[reward] += 1
 

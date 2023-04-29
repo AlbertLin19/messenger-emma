@@ -9,6 +9,6 @@
 #SBATCH --gres=gpu:1
 
 python3 -u train_khanh.py \
-                   --dataset_path custom_dataset/dataset_shuffle_10k_train_500_eval.pickle \
-                   --exp_name oracle_shuffle_10k_train_500_eval \
+                   --dataset_path custom_dataset/dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle \
+                   --exp_name oracle_shuffle_balanced_intentions_10k_train_500_eval \
                    --manuals oracle
