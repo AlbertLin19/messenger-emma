@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=messenger_oracle
+#SBATCH --job-name=messenger_gpt
 #SBATCH --output=slurm_output/%x-%j.out
 #SBATCH -N 1 #nodes
 #SBATCH -n 1 #tasks
@@ -10,5 +10,5 @@
 
 python3 -u train_khanh.py \
                    --dataset_path custom_dataset/dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle \
-                   --exp_name oracle_shuffle_balanced_intentions_10k_train_500_eval \
+                   --exp_name gpt_shuffle_balanced_intentions_10k_train_500_eval \
                    --manuals gpt

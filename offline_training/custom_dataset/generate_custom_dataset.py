@@ -201,7 +201,7 @@ random.seed(23)
 np.random.seed(23)
 
 SAVE_PATH = "./dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle"
-SPLITS_PATH = "./splits.json"
+SPLITS_PATH = "./data_splits_final.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
 NUM_TRAIN = 10000
