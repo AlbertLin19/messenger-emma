@@ -17,11 +17,13 @@ MOVEMENT_TYPES = {
     "chaser": 0,
     "fleeing": 1,
     "immovable": 2,
+    "unknown": 5,
 }
 ROLE_TYPES = {
     "message": 1,
     "goal": 2,
     "enemy": 0,
+    "unknown": 5,
 }
 
 ROLE_ORDER = ['enemy', 'message', 'goal']
@@ -158,8 +160,8 @@ class WorldModel(WorldModelBase):
 
         self.pos_embeddings = nn.Embedding(GRID_CHANNELS, attr_embed_dim)
         self.id_embeddings = nn.Embedding(NUM_ENTITIES, attr_embed_dim, padding_idx=0)
-        self.role_embeddings = nn.Embedding(len(ROLE_TYPES) + 2, attr_embed_dim)
-        self.movement_embeddings = nn.Embedding(len(MOVEMENT_TYPES) + 2, attr_embed_dim)
+        self.role_embeddings = nn.Embedding(len(ROLE_TYPES) + 3, attr_embed_dim)
+        self.movement_embeddings = nn.Embedding(len(MOVEMENT_TYPES) + 3, attr_embed_dim)
 
         self.encoder = ResNetEncoder(attr_embed_dim)
 
@@ -244,9 +246,9 @@ class WorldModel(WorldModelBase):
         return out.reshape(x.shape + (-1,))
 
     def embed_grids_with_parsed_manuals(self, grids, parsed_manuals):
-        positions = []
-        movements = []
-        roles = []
+        positions = [] # B x 4
+        movements = [] # B x 4
+        roles = [] # B x 4
         for triplet in parsed_manuals:
             movements.append([MOVEMENT_TYPES[e[1]] if e is not None else 4 for e in triplet] + [3])
             roles.append([ROLE_TYPES[e[2]] if e is not None else 4 for e in triplet] + [3])
@@ -256,8 +258,10 @@ class WorldModel(WorldModelBase):
         roles = torch.tensor(roles).to(self.device)
         positions = torch.tensor(positions).to(self.device)
 
+        # movements, roles, positions are B x 4 tensors of indices, where [b, i] is the index of m/r/p for the ith channel
+
         b, h, w, c = grids.shape
-        movements = movements.view(b, 1, 1, c).repeat(1, h, w, 1)
+        movements = movements.view(b, 1, 1, c).repeat(1, h, w, 1) # B x H x W x 4
         movements_embed = self._select(self.movement_embeddings, movements)
 
         roles = roles.view(b, 1, 1, c).repeat(1, h, w, 1)
@@ -266,16 +270,22 @@ class WorldModel(WorldModelBase):
         positions = positions.view(b, 1, 1, c).repeat(1, h, w, 1)
         positions_embed = self._select(self.pos_embeddings, positions)
 
+        # m/r/p embed are B x h x w x 4 x embed_dim, where [b, h, w, i] is the embed of ith channel (and h, w dont matter)
+
         mask = (grids > 0).float().unsqueeze(-1)
         # b x h x w x c x embed_dim
         movements_embed = movements_embed * mask
         roles_embed = roles_embed * mask
         positions_embed = positions_embed * mask
 
+        # now, embeds have nonzero only in correct grid position
+
         # b x h x w x embed_dim
         movements_embed = movements_embed.sum(dim=-2)
         roles_embed = roles_embed.sum(dim=-2)
         positions_embed = positions_embed.sum(dim=-2)
+
+        # dimension of size 4 is collapsed
 
         # b x embed_dim x h x w
         movements_embed = movements_embed.permute((0, 3, 1, 2))
@@ -385,9 +395,10 @@ class WorldModel(WorldModelBase):
                 if r == 0:
                     new_triplet.append(None)
                     continue
+                new_triplet.append(("unknown", "unknown", "unknown")) # unknown by default
                 for e in triplet:
-                    if ENTITY_IDS[e[0]] == r:
-                        new_triplet.append(e)
+                    if e[0] in ENTITY_IDS and ENTITY_IDS[e[0]] == r:
+                        new_triplet[-1] = e
                         break
             #print(new_triplet)
             assert len(new_triplet) == 3
@@ -458,7 +469,13 @@ class WorldModel(WorldModelBase):
                 for i, triplet in enumerate(parsed_manuals):
                     for j, e in enumerate(triplet):
                         preds['id'][i, j] = 0
-                        preds['id'][i, j, 0 if e is None else ENTITY_IDS[e[0]]] = 1.
+                        if e is None:
+                            k = 0
+                        elif e[0] not in ENTITY_IDS:
+                            k = 1
+                        else:
+                            k = ENTITY_IDS[e[0]]
+                        preds['id'][i, j, k] = 1.
                 preds['grid'] = self.predict_grid(preds)
 
         return preds, targets

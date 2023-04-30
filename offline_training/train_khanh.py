@@ -3,6 +3,7 @@ Script for offline training world models on Stage 2.
 '''
 import os
 import sys
+import json
 import argparse
 import time
 import pickle
@@ -26,6 +27,8 @@ from offline_training.batched_world_model.model_khanh import WorldModel
 from dataloader import DataLoader
 from evaluator import Evaluator
 
+from chatgpt_groundings.utils import ENTITY_GROUNDING_LOOKUP, MOVEMENT_GROUNDING_LOOKUP, ROLE_GROUNDING_LOOKUP
+
 def train(args):
 
     args.loss_weights = {
@@ -47,6 +50,15 @@ def train(args):
         device=args.device,
         max_length=36
     )
+
+    # chatgpt groundings
+    gpt_groundings = None
+    if args.manuals == "gpt":
+        with open(args.gpt_groundings_path, "r") as f:
+            gpt_groundings = json.load(f)
+            # convert groundings into keywords
+            for e, grounding in gpt_groundings.items():
+                gpt_groundings[e] = [ENTITY_GROUNDING_LOOKUP[grounding[0]], MOVEMENT_GROUNDING_LOOKUP[grounding[1]], ROLE_GROUNDING_LOOKUP[grounding[2]]]
 
     with open(args.dataset_path, "rb") as f:
         dataset = pickle.load(f)
@@ -133,6 +145,7 @@ def train(args):
                         eval_split,
                         step,
                         eval_world_model,
+                        gpt_groundings,
                         manuals_encoder,
                         eval_dataloader,
                         best_metric[eval_split]
@@ -158,7 +171,7 @@ def train(args):
         tensor_dones = torch.from_numpy(dones).long().to(args.device)
         tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
 
-        parsed_manuals = get_parsed_manuals(args, true_parsed_manuals)
+        parsed_manuals = get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings)
 
         if cur_idxs.tolist():
             world_model.step(
@@ -188,7 +201,7 @@ def train(args):
         if time.time() - start_time > 60 * 60 * args.max_time:
             break
 
-def evaluate(args, split, step, world_model, manuals_encoder, dataloader, best_metric):
+def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, dataloader, best_metric):
 
     world_model.eval()
 
@@ -218,7 +231,8 @@ def evaluate(args, split, step, world_model, manuals_encoder, dataloader, best_m
 
         if cur_idxs.tolist():
 
-            parsed_manuals = get_parsed_manuals(args, true_parsed_manuals)
+            parsed_manuals = get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings)
+            print(parsed_manuals)
 
             preds, targets = world_model.step(
                 old_tensor_grids,
@@ -273,10 +287,9 @@ def encode_manuals(args, manuals, manuals_encoder):
         return embedded_manuals
     return None
 
-def get_parsed_manuals(args, true_parsed_manuals):
+def get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings):
     if args.manuals == 'gpt':
-        # TODO: load chatgpt-parsed manuals
-        raise NotImplementedError
+        parsed_manuals = [[gpt_groundings[e] for e in manual] for manual in manuals]
     elif args.manuals == 'oracle':
         parsed_manuals = true_parsed_manuals
     else:
@@ -369,6 +382,7 @@ if __name__ == "__main__":
     # text config
     parser.add_argument("--manuals", type=str,
         choices=['none', 'embed', 'gpt', 'oracle'], help="which type of manuals to pass to the model")
+    parser.add_argument("--gpt_groundings_path", default="chatgpt_groundings/chatgpt_grounding_for_text_all.json", type=str, help="path to chatgpt groundings")
 
     # World model arguments
     parser.add_argument("--load_model_from", default=None, help="Path to world model state dict.")
