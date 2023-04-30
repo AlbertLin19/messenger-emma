@@ -388,6 +388,7 @@ if __name__ == "__main__":
     parser.add_argument("--hidden_size", default=512, type=int, help="World model hidden size.")
     parser.add_argument('--attr_embed_dim', type=int, default=256, help='attribute embedding size')
     parser.add_argument('--action_embed_dim', type=int, default=256, help='action embedding size')
+    parser.add_argument('--desc_key_dim', type=int, default=256, help="description key size")
     parser.add_argument('--keep_entity_features_for_parsed_manuals', type=int, default=1)
 
     parser.add_argument("--learning_rate", default=0.0001, type=float, help="World model learning rate.")

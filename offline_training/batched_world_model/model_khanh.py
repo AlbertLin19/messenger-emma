@@ -156,6 +156,7 @@ class WorldModel(WorldModelBase):
 
         self.hidden_size = hidden_size = args.hidden_size
         self.attr_embed_dim = attr_embed_dim = args.attr_embed_dim
+        self.desc_key_dim = desc_key_dim = args.desc_key_dim
         action_embed_dim = args.action_embed_dim
 
         self.pos_embeddings = nn.Embedding(GRID_CHANNELS, attr_embed_dim)
@@ -164,6 +165,22 @@ class WorldModel(WorldModelBase):
         self.movement_embeddings = nn.Embedding(len(MOVEMENT_TYPES) + 3, attr_embed_dim)
 
         self.encoder = ResNetEncoder(attr_embed_dim)
+        self.entity_query_embeddings = nn.Embedding(NUM_ENTITIES, desc_key_dim)
+        self.token_key = nn.Linear(768, desc_key_dim)
+        self.token_key_att = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Softmax(dim=-2)
+        )
+        self.token_movement_val = nn.Linear(768, attr_embed_dim)
+        self.token_movement_val_att = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Softmax(dim=-2)
+        )
+        self.token_role_val = nn.Linear(768, attr_embed_dim)
+        self.token_role_val_att = nn.Sequential(
+            nn.Linear(768, 1),
+            nn.Softmax(dim=-2)
+        )
 
         test_in = torch.zeros((1, attr_embed_dim, 10, 10))
         test_out = self.encoder(test_in)
@@ -270,7 +287,7 @@ class WorldModel(WorldModelBase):
         positions = positions.view(b, 1, 1, c).repeat(1, h, w, 1)
         positions_embed = self._select(self.pos_embeddings, positions)
 
-        # m/r/p embed are B x h x w x 4 x embed_dim, where [b, h, w, i] is the embed of ith channel (and h, w dont matter)
+        # m/r/p embed are B x h x w x 4 x embed_dim, where [b, h, w, i] is the embed of ith channel (and h, w is to broadcast against grid)
 
         mask = (grids > 0).float().unsqueeze(-1)
         # b x h x w x c x embed_dim
@@ -305,6 +322,68 @@ class WorldModel(WorldModelBase):
 
         return roles_embed + movements_embed + positions_embed + ids_embed
 
+    def embed_grids_with_embedded_manuals(self, grids, embedded_manuals):
+        # convert grids: b x h x w x c and embedded_manuals: b x 3 x 36 (sent_len) x 768 (emb_dim)
+        # to embed_grids: b x embed_dim x h x w
+
+        positions = [[0, 1, 2, 3] for _ in embedded_manuals] # B x 4
+        positions = torch.tensor(positions).to(self.device)
+        b, h, w, c = grids.shape
+        positions = positions.view(b, 1, 1, c).repeat(1, h, w, 1)
+        positions_embed = self._select(self.pos_embeddings, positions)
+
+        # need to construct movements_embed, roles_embed which are b x h x w x 4 x embed_dim, where [b, h, w, i] is the embed of ith channel
+        # compute attentions over descriptions
+        entity_query_embed = self._select(self.entity_query_embeddings, grids) # b x h x w x c x desc_key_dim
+        desc_key = torch.sum(self.token_key_att(embedded_manuals)*self.token_key(embedded_manuals), dim=-2) # b x 3 (num_sent) x desc_key_dim
+        desc_att = torch.matmul(entity_query_embed, desc_key.permute(0, 2, 1).view(b, 1, 1, self.desc_key_dim, 3)) # b x h x w x c x 3 (num_sent)
+        desc_att = desc_att / np.sqrt(self.desc_key_dim) # prevent vanishing gradient
+        desc_att = F.softmax(desc_att, dim=-1)
+        # compute description movement/role values
+        desc_movement_val = torch.sum(self.token_movement_val_att(embedded_manuals)*self.token_movement_val(embedded_manuals), dim=-2) # b x 3 (num_sent) x attr_embed_dim
+        desc_role_val = torch.sum(self.token_role_val_att(embedded_manuals)*self.token_role_val(embedded_manuals), dim=-2) # b x 3 (num_sent) x attr_embed_dim
+        # compute movements_embed and roles_embed
+        movements_embed = torch.sum(desc_att.view(b, h, w, c, 3, 1)*desc_movement_val.view(b, 1, 1, 1, 3, self.attr_embed_dim), dim=-2) # b x h x w x c x attr_embed_dim
+        roles_embed = torch.sum(desc_att.view(b, h, w, c, 3, 1)*desc_role_val.view(b, 1, 1, 1, 3, self.attr_embed_dim), dim=-2) # b x h x w x c x attr_embed_dim
+        # at this point, movements_embed and roles_embed are a batch of grids with channel depth 4, where each entry is a value encoding representative of the id at that location in the original grid
+        # need to zero-out the entries where ID is 0 (done later), and need to set avatar channel to be its own custom embedding
+        movements_embed[..., -1, :] = self.movement_embeddings(torch.tensor([3], device=self.device))
+        roles_embed[..., -1, :] = self.role_embeddings(torch.tensor([3], device=self.device))
+
+        mask = (grids > 0).float().unsqueeze(-1)
+        # b x h x w x c x embed_dim
+        movements_embed = movements_embed * mask
+        roles_embed = roles_embed * mask
+        positions_embed = positions_embed * mask
+
+        # now, embeds have nonzero only in correct grid position
+
+        # b x h x w x embed_dim
+        movements_embed = movements_embed.sum(dim=-2)
+        roles_embed = roles_embed.sum(dim=-2)
+        positions_embed = positions_embed.sum(dim=-2)
+
+        # dimension of size 4 is collapsed
+
+        # b x embed_dim x h x w
+        movements_embed = movements_embed.permute((0, 3, 1, 2))
+        roles_embed = roles_embed.permute((0, 3, 1, 2))
+        positions_embed = positions_embed.permute((0, 3, 1, 2))
+
+        grid_ids = grids.clone().long()
+        # zero out entity ids in the first 3 channels
+        if not self.keep_entity_features_for_parsed_manuals:
+            grid_ids[..., :-1][grid_ids[..., :-1] > 0] = 0
+        # b x h x w x c x embed_dim
+        ids_embed = self._select(self.id_embeddings, grid_ids)
+        # b x embed_dim x h x w
+        ids_embed = ids_embed.sum(dim=-2)
+        # b x embed_dim x h x w
+        ids_embed = ids_embed.permute((0, 3, 1, 2))
+
+        return roles_embed + movements_embed + positions_embed + ids_embed
+
+    
     def embed_grids_without_manuals(self, grids):
 
         b, h, w, c = grids.shape
@@ -327,6 +406,8 @@ class WorldModel(WorldModelBase):
 
         if self.manuals in ['gpt', 'oracle']:
             grids_embed = self.embed_grids_with_parsed_manuals(grids, parsed_manuals)
+        elif self.manuals == 'embed':
+            grids_embed = self.embed_grids_with_embedded_manuals(grids, embedded_manuals)
         elif self.manuals == 'none':
             grids_embed = self.embed_grids_without_manuals(grids)
         else:
