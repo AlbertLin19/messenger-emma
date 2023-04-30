@@ -232,7 +232,6 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
         if cur_idxs.tolist():
 
             parsed_manuals = get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings)
-            print(parsed_manuals)
 
             preds, targets = world_model.step(
                 old_tensor_grids,
