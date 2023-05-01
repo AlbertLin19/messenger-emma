@@ -22,6 +22,7 @@ sys.path.append('..')
 
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
+from offline_training.batched_world_model.model_khanh import ENTITY_IDS
 from messenger.models.utils import BatchedEncoder
 from offline_training.batched_world_model.model_khanh import WorldModel
 from dataloader import DataLoader
@@ -278,7 +279,36 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     log_str = '    BEST    ' + ', '.join(log_str)
     print(log_str)
 
+    # evaluate grounding
+    if args.manuals == 'embed':
+        avg_metric['grounding'] = evaluate_grounding(args, world_model, manuals_encoder, dataloader)
     return avg_metric
+
+def evaluate_grounding(args, world_model, manuals_encoder, dataloader):
+    entity_ids = list(ENTITY_IDS.values())
+    entity_ids.sort()
+    embedded_manual = torch.zeros((len(entity_ids), 36, 768), device=args.device)
+
+    # gather one description each
+    for i in range(len(entity_ids)):
+        found = False
+        for j in range(dataloader.n_rollouts):
+            if found:
+                break
+            for k in range(len(dataloader.ground_truths_array[j])):
+                if ENTITY_IDS[dataloader.ground_truths_array[j][k][0]] == entity_ids[i]:
+                    embedded_manual[i], _ = manuals_encoder.encode([[dataloader.manuals_array[j][k]]])
+                    found = True
+                    break
+        if not found:
+            raise RuntimeError
+    
+    # compute grounding
+    entity_query = world_model.entity_query_embeddings(torch.tensor(entity_ids).to(args.device)) # 12 x key_dim
+    desc_key = torch.sum(world_model.token_key_att(embedded_manual)*world_model.token_key(embedded_manual), dim=-2) # 12 x key_dim
+    desc_att_logits = torch.mm(entity_query, desc_key.T) # 12 (entities) x 12 (desc) grounding
+    desc_att = F.softmax(desc_att_logits / world_model.desc_key_dim, dim=-1)
+    return wandb.Image(desc_att.unsqueeze(-1))
 
 def encode_manuals(args, manuals, manuals_encoder):
     if args.manuals == 'embed':

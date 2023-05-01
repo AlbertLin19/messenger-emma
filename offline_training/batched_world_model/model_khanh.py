@@ -168,17 +168,23 @@ class WorldModel(WorldModelBase):
         self.entity_query_embeddings = nn.Embedding(NUM_ENTITIES, desc_key_dim)
         self.token_key = nn.Linear(768, desc_key_dim)
         self.token_key_att = nn.Sequential(
-            nn.Linear(768, 1),
+            nn.Linear(768, 384),
+            nn.ReLU(),
+            nn.Linear(384, 1),
             nn.Softmax(dim=-2)
         )
         self.token_movement_val = nn.Linear(768, attr_embed_dim)
         self.token_movement_val_att = nn.Sequential(
-            nn.Linear(768, 1),
+            nn.Linear(768, 384),
+            nn.ReLU(),
+            nn.Linear(384, 1),
             nn.Softmax(dim=-2)
         )
         self.token_role_val = nn.Linear(768, attr_embed_dim)
         self.token_role_val_att = nn.Sequential(
-            nn.Linear(768, 1),
+            nn.Linear(768, 384),
+            nn.ReLU(),
+            nn.Linear(384, 1),
             nn.Softmax(dim=-2)
         )
 
@@ -336,9 +342,8 @@ class WorldModel(WorldModelBase):
         # compute attentions over descriptions
         entity_query_embed = self._select(self.entity_query_embeddings, grids) # b x h x w x c x desc_key_dim
         desc_key = torch.sum(self.token_key_att(embedded_manuals)*self.token_key(embedded_manuals), dim=-2) # b x 3 (num_sent) x desc_key_dim
-        desc_att = torch.matmul(entity_query_embed, desc_key.permute(0, 2, 1).view(b, 1, 1, self.desc_key_dim, 3)) # b x h x w x c x 3 (num_sent)
-        desc_att = desc_att / np.sqrt(self.desc_key_dim) # prevent vanishing gradient
-        desc_att = F.softmax(desc_att, dim=-1)
+        desc_att_logits = torch.matmul(entity_query_embed, desc_key.permute(0, 2, 1).view(b, 1, 1, self.desc_key_dim, 3)) # b x h x w x c x 3 (num_sent)
+        desc_att = F.softmax(desc_att_logits / self.desc_key_dim, dim=-1)
         # compute description movement/role values
         desc_movement_val = torch.sum(self.token_movement_val_att(embedded_manuals)*self.token_movement_val(embedded_manuals), dim=-2) # b x 3 (num_sent) x attr_embed_dim
         desc_role_val = torch.sum(self.token_role_val_att(embedded_manuals)*self.token_role_val(embedded_manuals), dim=-2) # b x 3 (num_sent) x attr_embed_dim
