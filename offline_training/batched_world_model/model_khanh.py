@@ -343,7 +343,7 @@ class WorldModel(WorldModelBase):
         entity_query_embed = self._select(self.entity_query_embeddings, grids) # b x h x w x c x desc_key_dim
         desc_key = torch.sum(self.token_key_att(embedded_manuals)*self.token_key(embedded_manuals), dim=-2) # b x 3 (num_sent) x desc_key_dim
         desc_att_logits = torch.matmul(entity_query_embed, desc_key.permute(0, 2, 1).view(b, 1, 1, self.desc_key_dim, 3)) # b x h x w x c x 3 (num_sent)
-        desc_att = F.softmax(desc_att_logits / self.desc_key_dim, dim=-1)
+        desc_att = F.softmax(desc_att_logits / np.sqrt(self.desc_key_dim), dim=-1)
         # compute description movement/role values
         desc_movement_val = torch.sum(self.token_movement_val_att(embedded_manuals)*self.token_movement_val(embedded_manuals), dim=-2) # b x 3 (num_sent) x attr_embed_dim
         desc_role_val = torch.sum(self.token_role_val_att(embedded_manuals)*self.token_role_val(embedded_manuals), dim=-2) # b x 3 (num_sent) x attr_embed_dim
