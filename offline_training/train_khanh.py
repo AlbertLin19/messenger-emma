@@ -308,7 +308,7 @@ def evaluate_grounding(args, world_model, manuals_encoder, dataloader):
     desc_key = torch.sum(world_model.token_key_att(embedded_manual)*world_model.token_key(embedded_manual), dim=-2) # 12 x key_dim
     desc_att_logits = torch.mm(entity_query, desc_key.T) # 12 (entities) x 12 (desc) grounding
     desc_att = F.softmax(desc_att_logits / np.sqrt(world_model.desc_key_dim), dim=-1)
-    return wandb.Image(desc_att.unsqueeze(-1))
+    return wandb.Image(desc_att.unsqueeze(0))
 
 def encode_manuals(args, manuals, manuals_encoder):
     if args.manuals == 'embed':
