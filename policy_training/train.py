@@ -163,9 +163,9 @@ def train(args):
                 ppo.policy_old.eval()
 
                 for _ in range(args.eval_eps):
-                    obs, text = env.reset(split=eval_split, entities=random.choice(split_games[eval_split]), immobilize_entities=(args.stage == 1))
+                    obs, text, _ = env.reset(split=eval_split, entities=random.choice(split_games[eval_split]), immobilize_entities=(args.stage == 1))
                     obs = wrap_obs(obs)
-                    text = encoder.encode(text)
+                    text, _ = encoder.encode(text)
                     buffer.reset(obs)
 
                     # Running policy_old:
