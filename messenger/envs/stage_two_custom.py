@@ -149,7 +149,7 @@ class StageTwoCustom(MessengerEnv):
 
         return {"entities": entity_locs.grid, "avatar": avatar_locs.grid}
 
-    def reset(self, split, entities, **kwargs):
+    def reset(self, split, entities, immobilize_entities=False, **kwargs):
         '''
         Resets the current environment. NOTE: We remake the environment each time.
         This is a workaround to a bug in py-vgdl, where env.reset() does not
@@ -173,9 +173,9 @@ class StageTwoCustom(MessengerEnv):
         game_file_path = self.this_folder.joinpath('custom_game_file.txt')
         with open(game_file_path, 'w') as f:
             f.write(GAME_FILE_TEMPLATE % (
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['enemy'][1]],
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['message'][1]], 
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['goal'][1]], 
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['enemy'][1]] if not immobilize_entities else 'Immovable',
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['message'][1]] if not immobilize_entities else 'Immovable', 
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['goal'][1]] if not immobilize_entities else 'Immovable', 
             ))
 
         # args that will go into VGDL Env.

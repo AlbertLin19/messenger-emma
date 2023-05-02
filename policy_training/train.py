@@ -4,6 +4,7 @@ and the sole objective is to interact with the correct item.
 '''
 
 import argparse
+import json
 import time
 import pickle
 import random
@@ -61,16 +62,25 @@ def train(args):
     # memory stores all the information needed by PPO to compute losses and make updates
     memory = Memory()
 
+    # splits
+    with open(args.splits_path, 'r') as f:
+        split_games = json.load(f)
+    splits = list(split_games.keys())
+    for split in splits:
+        if 'train' in split:
+            train_split = split 
+            break
+    eval_splits = splits
+    
     # logging variables
-    teststats = []
-    runstats = []
+    evalstats_dict = {eval_split: [] for eval_split in eval_splits}
+    trainstats = []
         
-    # make the environments
-    env = gym.make(f'msgr-train-v{args.stage}')
-    eval_env = gym.make(f'msgr-val-v{args.stage}')
+    # make the environment
+    env = gym.make(f'msgr-custom-v2', shuffle_obs=False)
 
     # training stat tracker
-    eval_stats = TrainStats({-1: 'val_death', 1: "val_win"})
+    eval_stats_dict = {eval_split: TrainStats({-1: f'{eval_split}_death', 1: f"{eval_split}_win"}) for eval_split in eval_splits}
     train_stats = TrainStats({-1: 'death', 1: "win"})
 
     # Text Encoder
@@ -84,14 +94,14 @@ def train(args):
     # training variables
     i_episode = 0
     timestep = 0
-    max_win = -1
+    max_win_dict = {eval_split: -1 for eval_split in eval_splits}
     max_train_win = -1
     start_time = time.time()
 
     while True: # main training loop
-        obs, text = env.reset()
+        obs, text, _ = env.reset(split=train_split, entities=random.choice(split_games[train_split]), immobilize_entities=(args.stage == 1))
         obs = wrap_obs(obs)
-        text = encoder.encode(text)
+        text, _ = encoder.encode(text)
         buffer.reset(obs)
 
         # Episode loop
@@ -136,9 +146,9 @@ def train(args):
         # logging
         if i_episode % args.log_interval == 0:
             print("Episode {} \t {}".format(i_episode, train_stats))
-            runstats.append(train_stats.compress())
+            trainstats.append(train_stats.compress())
             if not args.check_script:
-                wandb.log(runstats[-1])
+                wandb.log(trainstats[-1])
             
             if train_stats.compress()['win'] > max_train_win:
                 torch.save(ppo.policy_old.state_dict(), args.output + "_maxtrain.pth")
@@ -148,45 +158,54 @@ def train(args):
 
         # run evaluation
         if i_episode % args.eval_interval == 0:
-            eval_stats.reset()
-            ppo.policy_old.eval()
+            for eval_split in eval_splits:
+                eval_stats_dict[eval_split].reset()
+                ppo.policy_old.eval()
 
-            for _ in range(args.eval_eps):
-                obs, text = eval_env.reset()
-                obs = wrap_obs(obs)
-                text = encoder.encode(text)
-                buffer.reset(obs)
-
-                # Running policy_old:
-                for t in range(args.max_steps):
-                    with torch.no_grad():
-                        action = ppo.policy_old.act(buffer.get_obs(), text, None)
-                    obs, reward, done, _ = eval_env.step(action)
+                for _ in range(args.eval_eps):
+                    obs, text = env.reset(split=eval_split, entities=random.choice(split_games[eval_split]), immobilize_entities=(args.stage == 1))
                     obs = wrap_obs(obs)
-                    if t == args.max_steps - 1 and reward != 1:
-                        reward = -1.0 # failed to complete objective
-                        done = True
-                        
-                    eval_stats.step(reward)
-                    if done:
-                        break
-                    buffer.update(obs)
-                eval_stats.end_of_episode()
+                    text = encoder.encode(text)
+                    buffer.reset(obs)
 
+                    # Running policy_old:
+                    for t in range(args.max_steps):
+                        with torch.no_grad():
+                            action = ppo.policy_old.act(buffer.get_obs(), text, None)
+                        obs, reward, done, _ = env.step(action)
+                        obs = wrap_obs(obs)
+                        if t == args.max_steps - 1 and reward != 1:
+                            reward = -1.0 # failed to complete objective
+                            done = True
+                            
+                        eval_stats_dict[eval_split].step(reward)
+                        if done:
+                            break
+                        buffer.update(obs)
+                    eval_stats_dict[eval_split].end_of_episode()
+
+                print("EVAL {}: \t {}".format(eval_split, eval_stats_dict[eval_split]))
+                evalstats_dict[eval_split].append(eval_stats_dict[eval_split].compress(append={"step": train_stats.total_steps}))
+
+                # save new best
+                if eval_stats_dict[eval_split].compress()[f'{eval_split}_win'] > max_win_dict[eval_split]:
+                    torch.save(ppo.policy_old.state_dict(), args.output + f"_{eval_split}_max.pth")
+                    max_win_dict[eval_split] = eval_stats_dict[eval_split].compress()[f'{eval_split}_win']
+                    
             ppo.policy_old.train()
 
-            print("TEST: \t {}".format(eval_stats))
-            teststats.append(eval_stats.compress(append={"step": train_stats.total_steps}))
+            # wandb log
+            log = {}
+            for eval_split in eval_splits:
+                log.update(evalstats_dict[eval_split][-1])
             if not args.check_script:
-                wandb.log(teststats[-1])
-
-            if eval_stats.compress()['val_win'] > max_win:
-                torch.save(ppo.policy_old.state_dict(), args.output + "_max.pth")
-                max_win = eval_stats.compress()['val_win']
-                
+                wandb.log(log)
+            
             # Save metrics
             with open(args.output + "_metrics.pkl", "wb") as file:
-                pickle.dump({"test": teststats, "run": runstats}, file)
+                metrics = {f"eval_{eval_split}": evalstats_dict[eval_split] for eval_split in eval_splits}
+                metrics.update({"train": trainstats})
+                pickle.dump(metrics, file)
 
             # Save model states
             torch.save(ppo.policy_old.state_dict(), args.output + "_state.pth")
@@ -212,6 +231,7 @@ if __name__ == "__main__":
     parser.add_argument("--stage", default=1, type=int, help="the stage to run experiment on")
     parser.add_argument("--max_steps", default=4, type=int, help="Maximum num of steps per episode")
     parser.add_argument("--step_penalty", default=0.0, type=float, help="negative reward for each step")
+    parser.add_argument("--splits_path", default="../offline_training/custom_dataset/data_splits_final.json", help="path to data splits")
     
     # Training arguments
     parser.add_argument("--update_timestep", default=64, type=int, help="Number of steps before model update")
@@ -260,7 +280,7 @@ if __name__ == "__main__":
 
     else:
         wandb.init(
-            project = "msgr-emma",
+            project = "msgr-emma-policy",
             entity = args.entity,
             group = args.log_group if args.log_group is not None else args_hash,
             name = f"emma_stage-{args.stage}_seed-{args.seed}"
