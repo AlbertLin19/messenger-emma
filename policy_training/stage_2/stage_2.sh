@@ -10,5 +10,5 @@ mkdir -p output
 mkdir -p slurm
 for seed in 1 2 3;
 do
-    sbatch $SLURM_ARGS stage_2.slurm $CMD --seed $seed --output output/emma_s2_$seed --load_state ../stage_1/output/emma_s1_"$seed"_max.pth
+    sbatch $SLURM_ARGS stage_2.slurm $CMD --seed $seed --output output/emma_s2_$seed --load_state ../stage_1/output/emma_s1_"$seed"_train_games_max.pth
 done
