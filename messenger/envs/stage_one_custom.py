@@ -193,4 +193,4 @@ class StageOneCustom(MessengerEnv):
             else:
                 raise Exception("Unknown avatar name {avatar.name}")
         
-        return obs, 0.0, False, None
+        return obs, 0.0, False, {}
