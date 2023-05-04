@@ -44,6 +44,11 @@ register(
 )
 
 register(
+    id = "msgr-custom-v1",
+    entry_point="messenger.envs:StageOneCustom",
+)
+
+register(
     id = "msgr-train-v2",
     entry_point="messenger.envs:TwoEnvWrapper",
     kwargs = dict(

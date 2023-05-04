@@ -77,7 +77,7 @@ def train(args):
     trainstats = []
         
     # make the environment
-    env = gym.make(f'msgr-custom-v2', shuffle_obs=False)
+    env = gym.make(f'msgr-custom-v{args.stage}', shuffle_obs=False)
 
     # training stat tracker
     eval_stats_dict = {eval_split: TrainStats({-1: f'{eval_split}_death', 1: f"{eval_split}_win"}) for eval_split in eval_splits}
@@ -99,7 +99,7 @@ def train(args):
     start_time = time.time()
 
     while True: # main training loop
-        obs, text, _ = env.reset(split=train_split, entities=random.choice(split_games[train_split]), immobilize_entities=(args.stage == 1))
+        obs, text, _ = env.reset(split=train_split, entities=random.choice(split_games[train_split]))
         obs = wrap_obs(obs)
         text, _ = encoder.encode(text)
         buffer.reset(obs)
@@ -163,7 +163,7 @@ def train(args):
                 ppo.policy_old.eval()
 
                 for _ in range(args.eval_eps):
-                    obs, text, _ = env.reset(split=eval_split, entities=random.choice(split_games[eval_split]), immobilize_entities=(args.stage == 1))
+                    obs, text, _ = env.reset(split=eval_split, entities=random.choice(split_games[eval_split]))
                     obs = wrap_obs(obs)
                     text, _ = encoder.encode(text)
                     buffer.reset(obs)
