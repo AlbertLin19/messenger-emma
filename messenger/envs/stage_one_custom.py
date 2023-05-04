@@ -50,7 +50,7 @@ class StageOneCustom(MessengerEnv):
         self.shuffle_obs = shuffle_obs
         this_folder = Path(__file__).parent
         
-        with open(self.this_folder.joinpath("texts", "custom_text_splits", "custom_text_splits.json"), "r") as f:
+        with open(this_folder.joinpath("texts", "custom_text_splits", "custom_text_splits.json"), "r") as f:
             self.custom_text_splits = json.load(f)
         
         self.positions = [ # all possible entity locations
