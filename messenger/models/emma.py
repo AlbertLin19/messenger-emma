@@ -93,9 +93,9 @@ class EMMA(nn.Module):
         weights = F.softmax(kq, dim=-1) * mask
         return torch.mean(weights.unsqueeze(-1) * value, dim=-2), weights
         
-    def forward(self, obs, manual):
+    def forward(self, obs, manual, deterministic=False, temperature=None):
         # encoder the text
-        temb = self.encoder.encode(manual)
+        temb, _ = self.encoder.encode(manual)
 
         # split the observation tensor into objects and avatar
         entity_obs = obs["entities"]
@@ -131,7 +131,14 @@ class EMMA(nn.Module):
         
         action_probs = self.action_layer(obs_emb)
 
+        if temperature:
+            raise NotImplementedError
+            return action
+
         action = torch.argmax(action_probs).item()
+        if deterministic:
+            return action
+
         if random.random() < 0.05: # random action with 0.05 prob
             action = random.randrange(0, self.action_dim)
         return action

@@ -2,6 +2,7 @@
 *.pth
 *.pickle
 *.swp
+*.ckpt
 messenger.egg-info
 wandb
 output

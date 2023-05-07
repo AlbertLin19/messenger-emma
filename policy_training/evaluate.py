@@ -1,0 +1,168 @@
+'''
+Script for evaluating policy and world_model_informed_policy on stage 2.
+'''
+
+import argparse
+from argparse import Namespace
+import json
+import time
+import pickle
+import random
+
+import gym
+import messenger # this needs to be imported even though its not used to register gym environment ids
+from messenger.models.utils import Encoder
+from messenger.models.emma import EMMA
+import torch
+from transformers import AutoModel, AutoTokenizer
+import numpy as np
+
+from offline_training.batched_world_model.model_khanh import WorldModel
+from messenger.models.utils import ObservationBuffer
+
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+
+def evaluate(args):
+
+    # load policy
+    policy = EMMA(
+        hist_len=args.hist_len,
+        n_latent_var=args.latent_vars,
+        emb_dim=args.emb_dim,
+    ).to(args.device)
+    policy.load_state_dict(torch.load(args.load_state, map_location=args.device))
+    policy.eval()
+
+    # load world model
+    world_model_args = {
+        key[len("world_model_"):]: value for key, value in vars(args).items() if key[:len("world_model_")] == "world_model_"
+    }
+    world_model_args.update({
+        "batch_size": args.num_policy_samples,
+        "device": args.device,
+        "learning_rate": 0,
+        "weight_decay": 0,
+        "reward_loss_weight": 0,
+        "done_loss_weight": 0,
+        "loss_weights": {
+            'loc': 0,
+            'id': 0,
+            'reward': 0,
+            'done': 0
+        },
+    })
+    world_model = WorldModel(Namespace(**world_model_args)).to(args.device)
+    world_model.load_state_dict(torch.load(args.world_model_load_model_from, map_location=args.device))
+    world_model.eval()
+
+    # load splits
+    with open(args.splits_path, 'r') as f:
+        split_games = json.load(f)
+    splits = list(split_games.keys())
+    
+    # make the environment
+    env = gym.make(f'msgr-custom-v2', shuffle_obs=False)
+
+    # Text Encoder
+    encoder_model = AutoModel.from_pretrained("bert-base-uncased")
+    tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    encoder = Encoder(model=encoder_model, tokenizer=tokenizer, device=args.device, max_length=36)
+
+    # Observation Buffer
+    buffer = ObservationBuffer(device=args.device, buffer_size=args.hist_len)
+
+    for split in splits:
+        print('evaluating', split)
+        policy_total_rewards = []
+        policy_with_world_model_total_rewards = []
+        for episode in tqdm(range(len(split_games[split]))):
+            
+            # evaluate policy
+            obs, manual, _ = env.reset(split=split, entities=split_games[split][episode])
+            buffer.reset(obs)
+
+            # episode loop
+            total_reward = 0
+            for t in range(args.max_steps):
+
+                with torch.no_grad():
+                    action = policy(buffer.get_obs(), manual, deterministic=True)
+                obs, reward, done, _ = env.step(action)
+                total_reward += reward
+                
+                if t == args.max_steps - 1 and reward != 1:
+                    reward = -1.0 # failed to complete objective
+                    done = True
+                    
+                if done:
+                    break
+                    
+                buffer.update(obs)
+            policy_total_rewards.append(total_reward)
+
+            # evaluate policy with world model
+            policy_with_world_model_total_rewards.append(random.random())
+        
+        policy_total_rewards = np.array(policy_total_rewards)
+        policy_mean = policy_total_rewards.mean()
+        policy_std = policy_total_rewards.std()
+
+        policy_with_world_model_total_rewards = np.array(policy_with_world_model_total_rewards)
+        policy_with_world_model_mean = policy_with_world_model_total_rewards.mean()
+        policy_with_world_model_std = policy_with_world_model_total_rewards.std()
+
+        # plot and save
+        x = ["Policy Alone", "Policy with World Model"]
+        y = [policy_mean, policy_with_world_model_mean]
+        yerr = [policy_std, policy_with_world_model_std]
+        plt.figure()
+        plt.bar(x, y)
+        plt.errorbar(x, y, yerr=yerr, fmt="o", color="black")
+        plt.title(f"Total Reward on Split: {split}")
+        plt.ylabel("Total Reward")
+        plt.savefig(f"evaluation/{split}.png")
+            
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    # General arguments
+    parser.add_argument("--seed", default=0, type=int, help="Set the seed for the model and training.")
+    parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
+
+    # Policy arguments
+    parser.add_argument("--load_state", default="stage_2/output/emma_s2_3_train_games_max.pth", help="Path to model state dict.")
+    parser.add_argument("--latent_vars", default=128, type=int, help="Latent model dimension.")
+    parser.add_argument("--hist_len", default=3, type=int, help="Length of history used by state buffer")
+    parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
+
+    # World model arguments
+    parser.add_argument("--world_model_manuals", default="gpt", type=str,
+        choices=['none', 'embed', 'gpt', 'oracle'], help="which type of manuals to pass to the model")
+    parser.add_argument("--world_model_gpt_groundings_path", default="../offline_training/chatgpt_groundings/chatgpt_grounding_for_text_all.json", type=str, help="path to chatgpt groundings")
+    parser.add_argument("--world_model_load_model_from", default="../offline_training/experiments/gpt_shuffle_balanced_intentions_10k_train_500_eval/train_games_best_total_loss.ckpt", help="Path to world model state dict.")
+    parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
+    parser.add_argument('--world_model_attr_embed_dim', type=int, default=256, help='attribute embedding size')
+    parser.add_argument('--world_model_action_embed_dim', type=int, default=256, help='action embedding size')
+    parser.add_argument('--world_model_desc_key_dim', type=int, default=256, help="description key size")
+    parser.add_argument('--world_model_keep_entity_features_for_parsed_manuals', type=int, default=1)
+
+    # Environment arguments
+    parser.add_argument("--splits_path", default="../offline_training/custom_dataset/data_splits_final_with_test.json", help="path to data splits")
+    
+    # Evaluation arguments
+    parser.add_argument("--policy_temperature", default=1, type=float, help="temperature of the policy (logits scaling)")
+    parser.add_argument("--num_policy_samples", default=64, type=int, help="number of policy samples to evaluate")
+    parser.add_argument("--max_lookahead_length", default=32, type=int, help="maximum steps to lookahead")
+    parser.add_argument("--max_steps", default=64, type=int, help="max length of an episode")
+
+    args = parser.parse_args()
+    args.device = torch.device(f"cuda:{args.device}")
+
+    # seed everything
+    torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.cuda.manual_seed_all(args.seed)
+    
+    evaluate(args)
