@@ -66,6 +66,8 @@ def train(args):
 
     # list of splits
     splits = list(dataset["rollouts"].keys())
+    # exclude all test splits
+    splits = [split for split in splits if "test" not in split]
     train_split = None
     for split in splits:
         if "train" in split:

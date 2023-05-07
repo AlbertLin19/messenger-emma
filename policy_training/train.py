@@ -66,6 +66,8 @@ def train(args):
     with open(args.splits_path, 'r') as f:
         split_games = json.load(f)
     splits = list(split_games.keys())
+    # exclude all test splits
+    splits = [split for split in splits if "test" not in split]
     for split in splits:
         if 'train' in split:
             train_split = split 
