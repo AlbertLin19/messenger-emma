@@ -165,28 +165,30 @@ class WorldModel(WorldModelBase):
         self.movement_embeddings = nn.Embedding(len(MOVEMENT_TYPES) + 3, attr_embed_dim)
 
         self.encoder = ResNetEncoder(attr_embed_dim)
-        self.entity_query_embeddings = nn.Embedding(NUM_ENTITIES, desc_key_dim)
-        self.token_key = nn.Linear(768, desc_key_dim)
-        self.token_key_att = nn.Sequential(
-            nn.Linear(768, 384),
-            nn.ReLU(),
-            nn.Linear(384, 1),
-            nn.Softmax(dim=-2)
-        )
-        self.token_movement_val = nn.Linear(768, attr_embed_dim)
-        self.token_movement_val_att = nn.Sequential(
-            nn.Linear(768, 384),
-            nn.ReLU(),
-            nn.Linear(384, 1),
-            nn.Softmax(dim=-2)
-        )
-        self.token_role_val = nn.Linear(768, attr_embed_dim)
-        self.token_role_val_att = nn.Sequential(
-            nn.Linear(768, 384),
-            nn.ReLU(),
-            nn.Linear(384, 1),
-            nn.Softmax(dim=-2)
-        )
+
+        if args.manuals == "embed":
+            self.entity_query_embeddings = nn.Embedding(NUM_ENTITIES, desc_key_dim)
+            self.token_key = nn.Linear(768, desc_key_dim)
+            self.token_key_att = nn.Sequential(
+                nn.Linear(768, 384),
+                nn.ReLU(),
+                nn.Linear(384, 1),
+                nn.Softmax(dim=-2)
+            )
+            self.token_movement_val = nn.Linear(768, attr_embed_dim)
+            self.token_movement_val_att = nn.Sequential(
+                nn.Linear(768, 384),
+                nn.ReLU(),
+                nn.Linear(384, 1),
+                nn.Softmax(dim=-2)
+            )
+            self.token_role_val = nn.Linear(768, attr_embed_dim)
+            self.token_role_val_att = nn.Sequential(
+                nn.Linear(768, 384),
+                nn.ReLU(),
+                nn.Linear(384, 1),
+                nn.Softmax(dim=-2)
+            )
 
         test_in = torch.zeros((1, attr_embed_dim, 10, 10))
         test_out = self.encoder(test_in)

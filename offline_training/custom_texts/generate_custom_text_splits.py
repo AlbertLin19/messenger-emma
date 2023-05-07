@@ -54,7 +54,7 @@ ROLES = [
 TEXT_DIR = "../../messenger/envs/texts"
 SAVE_DIR = "../../messenger/envs/texts/custom_text_splits"
 TEXT_FILES = ["text_train.json", "text_val.json", "text_test.json"]
-SPLITS_PATH = "../custom_dataset/data_splits_final.json"
+SPLITS_PATH = "../custom_dataset/data_splits_final_with_test.json"
 
 with open(SPLITS_PATH, "r") as f:
     splits = json.load(f)
@@ -103,9 +103,11 @@ for i in range(len(MESSENGER_ENTITIES)):
             print("        " + ROLES[k] + ": " + str(descriptor_counts[i, j, k]))
 print(np.sum(descriptor_counts), "total")
 
-# distribute descriptors proportionally to splits
-proportional_counts = np.rint((split_counts/split_counts.sum(axis=-1, keepdims=True))*descriptor_counts[..., None]).astype(int)
+# distribute descriptors proportionally to splits (but first ensure every split has >=1 of what they need)
+base_counts = split_counts != 0
+proportional_counts = (base_counts + np.rint((split_counts/split_counts.sum(axis=-1, keepdims=True))*(descriptor_counts[..., None] - base_counts.sum(axis=-1, keepdims=True)))).astype(int)
 assert np.all(proportional_counts[split_counts != 0])
+assert np.all(proportional_counts[split_counts == 0] == 0)
 for i in range(len(ENTITIES)):
     print(ENTITIES[i])
     for j in range(len(DYNAMICS)):
@@ -140,5 +142,7 @@ for entity, entity_descriptors in split_texts.items():
                 for split_descriptor in split_descriptors:
                     assert split_descriptor not in descriptors 
                     descriptors.append(split_descriptor)
+print(len(descriptors))
+print(descriptor_counts.sum())
 assert len(descriptors) == descriptor_counts.sum()
 print("verified")

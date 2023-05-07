@@ -231,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument("--stage", default=1, type=int, help="the stage to run experiment on")
     parser.add_argument("--max_steps", default=4, type=int, help="Maximum num of steps per episode")
     parser.add_argument("--step_penalty", default=0.0, type=float, help="negative reward for each step")
-    parser.add_argument("--splits_path", default="../offline_training/custom_dataset/data_splits_final.json", help="path to data splits")
+    parser.add_argument("--splits_path", default="../offline_training/custom_dataset/data_splits_final_with_test.json", help="path to data splits")
     
     # Training arguments
     parser.add_argument("--update_timestep", default=64, type=int, help="Number of steps before model update")
