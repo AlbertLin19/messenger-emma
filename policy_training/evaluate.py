@@ -23,6 +23,11 @@ from messenger.models.utils import ObservationBuffer
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+def wrap_obs(obs):
+    """ Convert obs format returned by gym env (dict) to a numpy array expected by model
+    """
+    return np.concatenate((obs["entities"], obs["avatar"]), axis=-1)
+
 def evaluate(args):
 
     # load policy
@@ -102,7 +107,44 @@ def evaluate(args):
             policy_total_rewards.append(total_reward)
 
             # evaluate policy with world model
-            policy_with_world_model_total_rewards.append(random.random())
+            obs, manual, _ = env.reset(split=split, entities=split_games[split][episode])
+            buffer.reset(obs)
+            world_model.state_reset(torch.from_numpy(wrap_obs(obs)).long().to(args.device))
+
+            # episode loop
+            total_reward = 0
+            for t in range(args.max_steps):
+
+                with torch.no_grad():
+                    # FIND BEST POLICY ACTION TO TAKE ACCORDING TO WORLD MODEL
+                    imagined_total_rewards = torch.zeros(args.num_policy_samples)
+                    imagined_actions = [policy(buffer.get_obs(), manual, temperature=args.policy_temperature) for _ in range(args.num_policy_samples)]
+                    for _ in range(args.max_lookahead_length):
+                        pass # TODO
+                old_obs = obs
+                obs, reward, done, _ = env.step(imagined_actions[torch.argmax(imagined_total_rewards).item()])
+                total_reward += reward
+                
+                if t == args.max_steps - 1 and reward != 1:
+                    reward = -1.0 # failed to complete objective
+                    done = True
+                    
+                if done:
+                    break
+                    
+                buffer.update(obs)
+                world_model.step(
+                    torch.from_numpy(wrap_obs(old_obs)).long().to(args.device),
+                    embedded_manuals,
+                    parsed_manuals,
+                    true_parsed_manuals,
+                    tensor_actions,
+                    tensor_grids,
+                    tensor_rewards,
+                    tensor_dones,
+                    cur_idxs
+                )
+            policy_with_world_model_total_rewards.append(total_reward)
         
         policy_total_rewards = np.array(policy_total_rewards)
         policy_mean = policy_total_rewards.mean()

@@ -7,6 +7,7 @@ import random
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import numpy as np
 from torch.distributions import Categorical
 from numpy import sqrt as sqrt
 from transformers import AutoModel, AutoTokenizer
@@ -93,7 +94,7 @@ class EMMA(nn.Module):
         weights = F.softmax(kq, dim=-1) * mask
         return torch.mean(weights.unsqueeze(-1) * value, dim=-2), weights
         
-    def forward(self, obs, manual, deterministic=False, temperature=None):
+    def forward(self, obs, manual, deterministic=False, temperature=False):
         # encoder the text
         temb, _ = self.encoder.encode(manual)
 
@@ -132,8 +133,8 @@ class EMMA(nn.Module):
         action_probs = self.action_layer(obs_emb)
 
         if temperature:
-            raise NotImplementedError
-            return action
+            action_probs = torch.softmax(torch.log(action_probs) / temperature, dim=-1)
+            return np.random.choice(range(len(action_probs)), p=action_probs.detach().cpu().numpy())
 
         action = torch.argmax(action_probs).item()
         if deterministic:
