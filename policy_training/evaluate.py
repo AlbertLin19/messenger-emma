@@ -261,7 +261,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.device = torch.device(f"cuda:{args.device}")
     if args.output_folder is None:
-        args.output_folder = f"evaluation/{os.path.basename(args.load_state).split('.')[0]}_{os.path.basename(args.world_model_load_model_from).split('.')[0]}_{time.time()}/"
+        args.output_folder = f"evaluation/{os.path.basename(args.load_state).split('.')[0]}_{os.path.basename(args.world_model_load_model_from).split('.')[0]}_{int(time.time())}/"
     os.makedirs(args.output_folder)
         
 
