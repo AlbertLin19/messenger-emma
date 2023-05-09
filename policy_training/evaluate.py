@@ -113,16 +113,13 @@ def evaluate(args):
                     action = policy(buffer.get_obs(), manual, deterministic=True)
                 obs, reward, done, _ = env.step(action)
                 total_reward += reward
-                
-                if t == args.max_steps - 1 and reward != 1:
-                    reward = -1.0 # failed to complete objective
-                    done = True
                     
                 if done:
                     break
                     
                 buffer.update(obs)
             policy_total_rewards.append(total_reward)
+            print(" policy alone:", total_reward)
 
             # evaluate policy with world model
             obs, manual, _ = env.reset(split=split, entities=split_games[split][episode])
@@ -142,6 +139,7 @@ def evaluate(args):
                     hidden_states, cell_states = torch.clone(world_model.hidden_states), torch.clone(world_model.cell_states)
                     
                     # FIND BEST POLICY ACTION TO TAKE ACCORDING TO WORLD MODEL
+                    imagined_initial_actions = None
                     imagined_total_rewards = torch.zeros(args.num_policy_samples).to(args.device)
                     imagined_dones = torch.zeros(args.num_policy_samples).to(args.device)
 
@@ -152,6 +150,8 @@ def evaluate(args):
 
                     for _ in range(args.max_lookahead_length):
                         imagined_actions = torch.tensor([policy(imagined_buffer.get_obs(), manual, temperature=args.policy_temperature) for imagined_buffer in imagined_buffers]).long().to(args.device)
+                        if imagined_initial_actions is None:
+                            imagined_initial_actions = imagined_actions
                         imagined_preds = world_model.pred(
                             imagined_grids,
                             parsed_manuals,
@@ -162,14 +162,15 @@ def evaluate(args):
                             imagined_buffers[i].update(unwrap_grid(imagined_preds["grid"][i]))
                         imagined_grids = imagined_preds["grid"]
 
+                        imagined_total_rewards += torch.logical_not(imagined_dones)*imagined_preds["reward"]
                         imagined_dones = torch.logical_or(imagined_dones, imagined_preds["done"])
                         if imagined_dones.all():
                             break
-                        imagined_total_rewards += imagined_dones*imagined_preds["reward"]
+
                     # REVERT HIDDEN STATES AND CELL STATES
                     world_model.hidden_states, world_model.cell_states = hidden_states, cell_states
 
-                action = imagined_actions[torch.argmax(imagined_total_rewards).item()]
+                action = imagined_initial_actions[torch.argmax(imagined_total_rewards).item()]
                 actions = torch.tensor([action for _ in range(args.num_policy_samples)]).long().to(args.device)
                 with torch.no_grad():
                     world_model.pred(
@@ -180,10 +181,6 @@ def evaluate(args):
                     )
                 obs, reward, done, _ = env.step(action)
                 total_reward += reward
-                
-                if t == args.max_steps - 1 and reward != 1:
-                    reward = -1.0 # failed to complete objective
-                    done = True
                     
                 if done:
                     break
@@ -193,6 +190,7 @@ def evaluate(args):
                 grids = grid.expand(args.num_policy_samples, *grid.shape)
                 
             policy_with_world_model_total_rewards.append(total_reward)
+            print(" policy with world model:", total_reward)
         
         policy_total_rewards = np.array(policy_total_rewards)
         policy_mean = policy_total_rewards.mean()
@@ -230,7 +228,7 @@ if __name__ == "__main__":
     parser.add_argument("--world_model_manuals", default="gpt", type=str,
         choices=['none', 'embed', 'gpt', 'oracle'], help="which type of manuals to pass to the model")
     parser.add_argument("--world_model_gpt_groundings_path", default="../offline_training/chatgpt_groundings/chatgpt_grounding_for_text_all.json", type=str, help="path to chatgpt groundings")
-    parser.add_argument("--world_model_load_model_from", default="../offline_training/experiments/gpt_shuffle_balanced_intentions_10k_train_500_eval/train_games_best_total_loss.ckpt", help="Path to world model state dict.")
+    parser.add_argument("--world_model_load_model_from", default="../offline_training/experiments/gpt_shuffle_balanced_intentions_10k_train_500_eval/ne_nr_or_nm_best_total_loss.ckpt", help="Path to world model state dict.")
     parser.add_argument("--world_model_hidden_size", default=512, type=int, help="World model hidden size.")
     parser.add_argument('--world_model_attr_embed_dim', type=int, default=256, help='attribute embedding size')
     parser.add_argument('--world_model_action_embed_dim', type=int, default=256, help='action embedding size')
@@ -241,7 +239,7 @@ if __name__ == "__main__":
     parser.add_argument("--splits_path", default="../offline_training/custom_dataset/data_splits_final_with_test.json", help="path to data splits")
     
     # Evaluation arguments
-    parser.add_argument("--policy_temperature", default=1, type=float, help="temperature of the policy (logits scaling)")
+    parser.add_argument("--policy_temperature", default=2, type=float, help="temperature of the policy (logits scaling)")
     parser.add_argument("--num_policy_samples", default=64, type=int, help="number of policy samples to evaluate")
     parser.add_argument("--max_lookahead_length", default=32, type=int, help="maximum steps to lookahead")
     parser.add_argument("--max_steps", default=64, type=int, help="max length of an episode")
