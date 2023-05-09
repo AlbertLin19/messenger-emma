@@ -197,13 +197,13 @@ def evaluate(args):
             print(" policy with world model:", total_reward)
         
         # save to file
-        folder = f"evaluation/{os.path.basename(args.load_state)}_{os.path.basename(args.world_model_load_model_from)}/"
-        os.makedirs(folder)
-        with open(os.path.join(folder, f"{split}.json"), "w") as f:
-            json.dump({
-                "policy_total_rewards": policy_total_rewards,
-                "policy_with_world_model_total_rewards": policy_with_world_model_total_rewards
-            })
+        with open(os.path.join(args.output_folder, f"{split}.json"), "w") as f:
+            json.dump(
+                {
+                    "policy_total_rewards": policy_total_rewards, 
+                    "policy_with_world_model_total_rewards": policy_with_world_model_total_rewards
+                }, f
+            )
         
         policy_total_rewards = np.array(policy_total_rewards)
         policy_mean = policy_total_rewards.mean()
@@ -222,12 +222,13 @@ def evaluate(args):
         plt.errorbar(x, y, yerr=yerr, fmt="o", color="black")
         plt.title(f"Total Reward on Split: {split}")
         plt.ylabel("Total Reward")
-        plt.savefig(os.path.join(folder, f"{split}.jpg"))
+        plt.savefig(os.path.join(args.output_folder, f"{split}.jpg"))
             
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
     # General arguments
+    parser.add_argument("--output_folder", default=None, type=str, help="output folder")
     parser.add_argument("--seed", default=0, type=int, help="Set the seed for the model and training.")
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
 
@@ -259,6 +260,10 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     args.device = torch.device(f"cuda:{args.device}")
+    if args.output_folder is None:
+        args.output_folder = f"evaluation/{os.path.basename(args.load_state).split('.')[0]}_{os.path.basename(args.world_model_load_model_from).split('.')[0]}_{time.time()}/"
+    os.makedirs(args.output_folder)
+        
 
     # seed everything
     torch.manual_seed(args.seed)
