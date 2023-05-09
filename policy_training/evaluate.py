@@ -2,6 +2,7 @@
 Script for evaluating policy and world_model_informed_policy on stage 2.
 '''
 
+import os
 import argparse
 from argparse import Namespace
 import json
@@ -97,6 +98,9 @@ def evaluate(args):
 
     for split in splits:
         print('evaluating', split)
+        if 'train' in split:
+            print('skipping...')
+            continue
         policy_total_rewards = []
         policy_with_world_model_total_rewards = []
         for episode in tqdm(range(len(split_games[split]))):
@@ -192,6 +196,15 @@ def evaluate(args):
             policy_with_world_model_total_rewards.append(total_reward)
             print(" policy with world model:", total_reward)
         
+        # save to file
+        folder = f"evaluation/{os.path.basename(args.load_state)}_{os.path.basename(args.world_model_load_model_from)}/"
+        os.makedirs(folder)
+        with open(os.path.join(folder, f"{split}.json"), "w") as f:
+            json.dump({
+                "policy_total_rewards": policy_total_rewards,
+                "policy_with_world_model_total_rewards": policy_with_world_model_total_rewards
+            })
+        
         policy_total_rewards = np.array(policy_total_rewards)
         policy_mean = policy_total_rewards.mean()
         policy_std = policy_total_rewards.std()
@@ -209,7 +222,7 @@ def evaluate(args):
         plt.errorbar(x, y, yerr=yerr, fmt="o", color="black")
         plt.title(f"Total Reward on Split: {split}")
         plt.ylabel("Total Reward")
-        plt.savefig(f"evaluation/{split}.png")
+        plt.savefig(os.path.join(folder, f"{split}.jpg"))
             
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -219,7 +232,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
 
     # Policy arguments
-    parser.add_argument("--load_state", default="stage_2/output/emma_s2_3_train_games_max.pth", help="Path to model state dict.")
+    parser.add_argument("--load_state", default="stage_1/output/emma_s1_1_train_games_max.pth", help="Path to model state dict.")
     parser.add_argument("--latent_vars", default=128, type=int, help="Latent model dimension.")
     parser.add_argument("--hist_len", default=3, type=int, help="Length of history used by state buffer")
     parser.add_argument("--emb_dim", default=256, type=int, help="embedding size for text")
