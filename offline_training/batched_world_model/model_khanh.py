@@ -444,6 +444,12 @@ class WorldModel(WorldModelBase):
 
         return logits, (hidden_states, cell_states)
 
+    def create_loc_logits(self, grid_logits, nonexistence_logits):
+        grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
+        nonexistence_logits = nonexistence_logits.unsqueeze(-1)
+        location_logits = torch.cat((grid_logits, nonexistence_logits), dim=-1)
+        return location_logits
+    
     def create_loc_logits_and_targets(self, grid_logits, nonexistence_logits, grids):
 
         grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
@@ -567,3 +573,49 @@ class WorldModel(WorldModelBase):
                 preds['grid'] = self.predict_grid(preds)
 
         return preds, targets
+
+    def pred(self,
+            old_grids,
+            parsed_manuals,
+            actions,
+            sample):
+
+        if self.manuals != "gpt":
+            raise NotImplementedError
+
+        parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, old_grids)
+        
+        logits, (self.hidden_states, self.cell_states) = self.forward(
+            old_grids,
+            None,
+            parsed_manuals,
+            actions,
+            (self.hidden_states, self.cell_states),
+        )
+
+        logits['loc'] = self.create_loc_logits(
+            logits['grid'],
+            logits['nonexistence']
+        )
+
+        with torch.no_grad():
+            preds = {}
+            preds['loc'] = logits['loc'].softmax(dim=-1)
+            preds['reward'] = logits['reward'].detach()
+            preds['done'] = torch.sigmoid(logits['done'])
+            preds['id'] = logits['id'].softmax(dim=-1)
+            # oracle or gpt manuals: use parsed_manuals to overwrite id predictions
+            if parsed_manuals is not None:
+                for i, triplet in enumerate(parsed_manuals):
+                    for j, e in enumerate(triplet):
+                        preds['id'][i, j] = 0
+                        if e is None:
+                            k = 0
+                        elif e[0] not in ENTITY_IDS:
+                            k = 1
+                        else:
+                            k = ENTITY_IDS[e[0]]
+                        preds['id'][i, j, k] = 1.
+                preds['grid'] = self.predict_grid(preds, sample=sample)
+
+        return preds

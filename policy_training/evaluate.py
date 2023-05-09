@@ -23,10 +23,20 @@ from messenger.models.utils import ObservationBuffer
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
+from offline_training.chatgpt_groundings.utils import ENTITY_GROUNDING_LOOKUP, MOVEMENT_GROUNDING_LOOKUP, ROLE_GROUNDING_LOOKUP
+
 def wrap_obs(obs):
     """ Convert obs format returned by gym env (dict) to a numpy array expected by model
     """
     return np.concatenate((obs["entities"], obs["avatar"]), axis=-1)
+
+def unwrap_grid(grid):
+    """ Convert grid format returned by world model to an obs expected by policy
+    """
+    return {
+        "entities": grid[..., :-1].detach().cpu().numpy(),
+        "avatar": grid[..., -1:].detach().cpu().numpy()
+    }
 
 def evaluate(args):
 
@@ -74,6 +84,14 @@ def evaluate(args):
     tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
     encoder = Encoder(model=encoder_model, tokenizer=tokenizer, device=args.device, max_length=36)
 
+    # chatgpt groundings
+    with open(args.world_model_gpt_groundings_path, "r") as f:
+        gpt_groundings = json.load(f)
+        # convert groundings into keywords
+        for e, grounding in gpt_groundings.items():
+            gpt_groundings[e] = [ENTITY_GROUNDING_LOOKUP[grounding[0]], MOVEMENT_GROUNDING_LOOKUP[grounding[1]], ROLE_GROUNDING_LOOKUP[grounding[2]]]
+
+
     # Observation Buffer
     buffer = ObservationBuffer(device=args.device, buffer_size=args.hist_len)
 
@@ -109,20 +127,58 @@ def evaluate(args):
             # evaluate policy with world model
             obs, manual, _ = env.reset(split=split, entities=split_games[split][episode])
             buffer.reset(obs)
-            world_model.state_reset(torch.from_numpy(wrap_obs(obs)).long().to(args.device))
+            grid = torch.from_numpy(wrap_obs(obs)).long().to(args.device)
+            grids = grid.expand(args.num_policy_samples, *grid.shape)
+            world_model.state_reset(grids)
+
+            parsed_manual = [gpt_groundings[e] for e in manual]
+            parsed_manuals = [parsed_manual for _ in range(args.num_policy_samples)]
 
             # episode loop
             total_reward = 0
             for t in range(args.max_steps):
-
+                
                 with torch.no_grad():
+                    hidden_states, cell_states = torch.clone(world_model.hidden_states), torch.clone(world_model.cell_states)
+                    
                     # FIND BEST POLICY ACTION TO TAKE ACCORDING TO WORLD MODEL
-                    imagined_total_rewards = torch.zeros(args.num_policy_samples)
-                    imagined_actions = [policy(buffer.get_obs(), manual, temperature=args.policy_temperature) for _ in range(args.num_policy_samples)]
+                    imagined_total_rewards = torch.zeros(args.num_policy_samples).to(args.device)
+                    imagined_dones = torch.zeros(args.num_policy_samples).to(args.device)
+
+                    imagined_buffers = [ObservationBuffer(device=args.device, buffer_size=args.hist_len) for _ in range(args.num_policy_samples)]
+                    for imagined_buffer in imagined_buffers:
+                        imagined_buffer.buffer = [buffer_obs for buffer_obs in buffer.buffer]
+                    imagined_grids = grids
+
                     for _ in range(args.max_lookahead_length):
-                        pass # TODO
-                old_obs = obs
-                obs, reward, done, _ = env.step(imagined_actions[torch.argmax(imagined_total_rewards).item()])
+                        imagined_actions = torch.tensor([policy(imagined_buffer.get_obs(), manual, temperature=args.policy_temperature) for imagined_buffer in imagined_buffers]).long().to(args.device)
+                        imagined_preds = world_model.pred(
+                            imagined_grids,
+                            parsed_manuals,
+                            imagined_actions,
+                            sample=True
+                        )
+                        for i in range(args.num_policy_samples):
+                            imagined_buffers[i].update(unwrap_grid(imagined_preds["grid"][i]))
+                        imagined_grids = imagined_preds["grid"]
+
+                        imagined_dones = torch.logical_or(imagined_dones, imagined_preds["done"])
+                        if imagined_dones.all():
+                            break
+                        imagined_total_rewards += imagined_dones*imagined_preds["reward"]
+                    # REVERT HIDDEN STATES AND CELL STATES
+                    world_model.hidden_states, world_model.cell_states = hidden_states, cell_states
+
+                action = imagined_actions[torch.argmax(imagined_total_rewards).item()]
+                actions = torch.tensor([action for _ in range(args.num_policy_samples)]).long().to(args.device)
+                with torch.no_grad():
+                    world_model.pred(
+                        grids,
+                        parsed_manuals,
+                        actions,
+                        sample=False
+                    )
+                obs, reward, done, _ = env.step(action)
                 total_reward += reward
                 
                 if t == args.max_steps - 1 and reward != 1:
@@ -133,17 +189,9 @@ def evaluate(args):
                     break
                     
                 buffer.update(obs)
-                world_model.step(
-                    torch.from_numpy(wrap_obs(old_obs)).long().to(args.device),
-                    embedded_manuals,
-                    parsed_manuals,
-                    true_parsed_manuals,
-                    tensor_actions,
-                    tensor_grids,
-                    tensor_rewards,
-                    tensor_dones,
-                    cur_idxs
-                )
+                grid = torch.from_numpy(wrap_obs(obs)).long().to(args.device)
+                grids = grid.expand(args.num_policy_samples, *grid.shape)
+                
             policy_with_world_model_total_rewards.append(total_reward)
         
         policy_total_rewards = np.array(policy_total_rewards)
