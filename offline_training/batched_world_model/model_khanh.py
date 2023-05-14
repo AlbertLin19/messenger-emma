@@ -1,4 +1,5 @@
 import math
+from copy import deepcopy
 from pprint import pprint
 
 import torch
@@ -6,8 +7,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
+from transformers import AutoConfig, AutoModel
 
-from offline_training.batched_world_model.modules import ResNetEncoder, ResNetDecoder
+from offline_training.batched_world_model.modules import ResNetEncoder, ResNetDecoder, ScaledDotProductAttention
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 from messenger.envs.config import NPCS, NO_MESSAGE, WITH_MESSAGE
@@ -55,6 +57,9 @@ class WorldModelBase(nn.Module):
         else:
             normalizer = self.batch_size * GRID_CHANNELS
 
+        #normalizer = self.batch_size
+        #print(logits[0].max(-1)[1].tolist(), targets[0].tolist())
+
         logits = logits.view(-1, logits.shape[-1])
         targets = targets.view(-1)
 
@@ -63,7 +68,9 @@ class WorldModelBase(nn.Module):
             targets,
             ignore_index=-1,
             reduction='sum'
-        ) / normalizer
+        )
+
+        loss /= normalizer
 
         return loss
 
@@ -90,9 +97,24 @@ class WorldModelBase(nn.Module):
     # update model via real loss
     def loss_update(self):
         self.optimizer.zero_grad()
-        total_loss = 0
-        for k in self.loss:
-            total_loss += self.loss[k] * self.loss_weight[k]
+
+        if self.train_loc_loss_only:
+            total_loss = self.loss['loc']
+        elif self.train_id_loss_only:
+            total_loss = self.loss['id']
+        elif self.train_reward_and_done_losses_only:
+            total_loss = self.loss['reward'] + self.loss['done']
+        elif self.train_all_losses_except_loc:
+            total_loss = 0.
+            for k in self.loss:
+                if k == 'loc':
+                    continue
+                total_loss += self.loss[k] * self.loss_weight[k]
+        else:
+            total_loss = 0.
+            for k in self.loss:
+                total_loss += self.loss[k] * self.loss_weight[k]
+
         total_loss.backward()
         self.optimizer.step()
 
@@ -153,6 +175,11 @@ class WorldModel(WorldModelBase):
         self.device = args.device
         self.manuals = args.manuals
         self.keep_entity_features_for_parsed_manuals = args.keep_entity_features_for_parsed_manuals
+        self.use_true_attention = args.use_true_attention
+        self.train_id_loss_only = args.train_id_loss_only
+        self.train_loc_loss_only = args.train_loc_loss_only
+        self.train_reward_and_done_losses_only = args.train_reward_and_done_losses_only
+        self.train_all_losses_except_loc = args.train_all_losses_except_loc
 
         self.hidden_size = hidden_size = args.hidden_size
         self.attr_embed_dim = attr_embed_dim = args.attr_embed_dim
@@ -164,7 +191,44 @@ class WorldModel(WorldModelBase):
         self.role_embeddings = nn.Embedding(len(ROLE_TYPES) + 3, attr_embed_dim)
         self.movement_embeddings = nn.Embedding(len(MOVEMENT_TYPES) + 3, attr_embed_dim)
 
-        self.encoder = ResNetEncoder(attr_embed_dim)
+        # manual attention
+        text_embed_dim = 768
+        self.manual_key_scale = nn.Linear(text_embed_dim, 1)
+        self.manual_key_linear = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.manual_value_scale = nn.Linear(text_embed_dim, 1)
+        self.manual_value_linear = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.manual_attention = ScaledDotProductAttention(attr_embed_dim)
+
+        """
+        bert_config = AutoConfig.from_pretrained(
+            'prajjwal1/bert-tiny',
+            hidden_size=text_embed_dim,
+            vocab_size=1,
+            num_attention_heads=1,
+            num_hidden_layers=1,
+            max_position_embeddings=40,
+            attention_probs_dropout_prob=0,
+            hidden_dropout_prob=0
+        )
+        self.manual_key_linear = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.manual_value_linear = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.manual_key_transformer = AutoModel.from_config(bert_config)
+        self.manual_value_transformer = AutoModel.from_config(bert_config)
+        self.manual_attention = ScaledDotProductAttention(attr_embed_dim)
+        """
+
+
+        """
+        self.movement_value_proj = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.movement_key_proj = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.movement_attention = ScaledDotProductAttention(attr_embed_dim)
+
+        self.role_value_proj = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.role_key_proj = nn.Linear(text_embed_dim, attr_embed_dim)
+        self.role_attention = ScaledDotProductAttention(attr_embed_dim)
+        """
+
+        """
         self.entity_query_embeddings = nn.Embedding(NUM_ENTITIES, desc_key_dim)
         self.token_key = nn.Linear(768, desc_key_dim)
         self.token_key_att = nn.Sequential(
@@ -187,7 +251,9 @@ class WorldModel(WorldModelBase):
             nn.Linear(384, 1),
             nn.Softmax(dim=-2)
         )
+        """
 
+        self.encoder = ResNetEncoder(attr_embed_dim)
         test_in = torch.zeros((1, attr_embed_dim, 10, 10))
         test_out = self.encoder(test_in)
         self.after_encoder_shape = test_out.shape
@@ -327,17 +393,98 @@ class WorldModel(WorldModelBase):
         ids_embed = ids_embed.permute((0, 3, 1, 2))
 
         return roles_embed + movements_embed + positions_embed + ids_embed
+        #return positions_embed + ids_embed
 
-    def embed_grids_with_embedded_manuals(self, grids, embedded_manuals):
+    def embed_grids_with_embedded_manuals(self, grids, embedded_manuals, manuals_attn_mask):
         # convert grids: b x h x w x c and embedded_manuals: b x 3 x 36 (sent_len) x 768 (emb_dim)
         # to embed_grids: b x embed_dim x h x w
 
+        b, h, w, c = grids.shape
         positions = [[0, 1, 2, 3] for _ in embedded_manuals] # B x 4
         positions = torch.tensor(positions).to(self.device)
-        b, h, w, c = grids.shape
         positions = positions.view(b, 1, 1, c).repeat(1, h, w, 1)
         positions_embed = self._select(self.pos_embeddings, positions)
 
+        # create an empty manual
+        #embedded_manuals = embedded_manuals.mean(dim=-2)
+        """
+        _, _, l, d = embedded_manuals.shape
+        empty_manual = torch.zeros((b, 1, l, d)).to(self.device)
+        embedded_manuals = torch.cat((embedded_manuals, empty_manual), dim=1)
+        """
+
+
+        """
+        flat_embedded_manuals = embedded_manuals.view(-1, l, d)
+
+        manuals_key = self.manual_key_transformer.forward(inputs_embeds=flat_embedded_manuals).last_hidden_state
+        manuals_key = manuals_key.view(b, c, l, d)
+        manuals_key = manuals_key.mean(dim=-2)
+        manuals_key = self.manual_key_linear(manuals_key)
+
+        manuals_value = self.manual_value_transformer.forward(inputs_embeds=flat_embedded_manuals).last_hidden_state
+        manuals_value = manuals_value.view(b, c, l, d)
+        manuals_value = manuals_value.mean(dim=-2)
+        manuals_value = self.manual_value_linear(manuals_value)
+        """
+
+        # key
+        manuals_key = self.manual_key_linear(embedded_manuals)
+        manuals_key_scale = self.manual_key_scale(embedded_manuals)
+        manuals_key_scale.masked_fill_(manuals_attn_mask.unsqueeze(-1), -float('inf'))
+        manuals_key_scale = manuals_key_scale.softmax(dim=-2)
+        manuals_key = (manuals_key * manuals_key_scale).sum(dim=-2)
+
+        # value
+        manuals_value = self.manual_value_linear(embedded_manuals)
+        manuals_value_scale = self.manual_value_scale(embedded_manuals)
+        manuals_value_scale.masked_fill_(manuals_attn_mask.unsqueeze(-1), -float('inf'))
+        manuals_value_scale = manuals_value_scale.softmax(dim=-2)
+        manuals_value = (manuals_value * manuals_value_scale).sum(dim=-2)
+
+        # query
+        entities, _ = grids.view(b, -1, c).max(1)
+        entities_query = self._select(self.id_embeddings, entities)
+
+        true_attn = self.true_attn if self.use_true_attention else None
+        attr_embed, self.attn = self.manual_attention(
+            entities_query[:,:-1,:],  # exclude the player
+            manuals_key,
+            manuals_value,
+            true_attn=true_attn
+        )
+        player_embed = entities_query[:,-1,:]
+        attr_embed = torch.cat((attr_embed, player_embed.unsqueeze(1)), dim=1)
+        attr_embed = attr_embed.view(b, 1, 1, c, attr_embed.shape[-1]).repeat(1, h, w, 1, 1)
+
+        #print(entities[0].tolist())
+        #print(attn[0, 0])
+
+        """
+        # movement attention
+        movements_key = self.movement_key_proj(embedded_manuals)
+        movements_value = self.movement_value_proj(embedded_manuals)
+        movements_embed, _ = self.movement_attention(
+            entities_query,
+            movements_key,
+            movements_value
+        )
+        movements_embed = movements_embed.view(b, 1, 1, c, movements_embed.shape[-1]).repeat(1, h, w, 1, 1)
+
+        # role attention
+        roles_key = self.role_key_proj(embedded_manuals)
+        roles_value = self.role_value_proj(embedded_manuals)
+        roles_embed, _ = self.role_attention(
+            entities_query,
+            roles_key,
+            roles_value
+        )
+        roles_embed = roles_embed.view(b, 1, 1, c, roles_embed.shape[-1]).repeat(1, h, w, 1, 1)
+        """
+
+        #print(movements_embed.shape, roles_embed.shape)
+
+        """
         # need to construct movements_embed, roles_embed which are b x h x w x 4 x embed_dim, where [b, h, w, i] is the embed of ith channel
         # compute attentions over descriptions
         entity_query_embed = self._select(self.entity_query_embeddings, grids) # b x h x w x c x desc_key_dim
@@ -354,31 +501,39 @@ class WorldModel(WorldModelBase):
         # need to zero-out the entries where ID is 0 (done later), and need to set avatar channel to be its own custom embedding
         movements_embed[..., -1, :] = self.movement_embeddings(torch.tensor([3], device=self.device))
         roles_embed[..., -1, :] = self.role_embeddings(torch.tensor([3], device=self.device))
+        """
 
         mask = (grids > 0).float().unsqueeze(-1)
         # b x h x w x c x embed_dim
+        """
         movements_embed = movements_embed * mask
         roles_embed = roles_embed * mask
+        """
+        attr_embed = attr_embed * mask
         positions_embed = positions_embed * mask
 
         # now, embeds have nonzero only in correct grid position
 
         # b x h x w x embed_dim
+        """
         movements_embed = movements_embed.sum(dim=-2)
         roles_embed = roles_embed.sum(dim=-2)
+        """
+        attr_embed = attr_embed.sum(dim=-2)
         positions_embed = positions_embed.sum(dim=-2)
 
         # dimension of size 4 is collapsed
 
         # b x embed_dim x h x w
+        """
         movements_embed = movements_embed.permute((0, 3, 1, 2))
         roles_embed = roles_embed.permute((0, 3, 1, 2))
+        """
+        attr_embed = attr_embed.permute((0, 3, 1, 2))
         positions_embed = positions_embed.permute((0, 3, 1, 2))
 
         grid_ids = grids.clone().long()
-        # zero out entity ids in the first 3 channels
-        if not self.keep_entity_features_for_parsed_manuals:
-            grid_ids[..., :-1][grid_ids[..., :-1] > 0] = 0
+        #print('===>', grid_ids.view(b, -1, c)[0].max(0)[0].tolist())
         # b x h x w x c x embed_dim
         ids_embed = self._select(self.id_embeddings, grid_ids)
         # b x embed_dim x h x w
@@ -386,9 +541,10 @@ class WorldModel(WorldModelBase):
         # b x embed_dim x h x w
         ids_embed = ids_embed.permute((0, 3, 1, 2))
 
-        return roles_embed + movements_embed + positions_embed + ids_embed
+        #return roles_embed + movements_embed + positions_embed + ids_embed
+        return attr_embed + positions_embed #+ ids_embed
+        #return positions_embed + ids_embed
 
-    
     def embed_grids_without_manuals(self, grids):
 
         b, h, w, c = grids.shape
@@ -407,12 +563,12 @@ class WorldModel(WorldModelBase):
         return positions_embed + ids_embed
 
 
-    def forward(self, grids, embedded_manuals, parsed_manuals, actions, lstm_states):
+    def forward(self, grids, embedded_manuals, manuals_attn_mask, parsed_manuals, actions, lstm_states):
 
         if self.manuals in ['gpt', 'oracle']:
             grids_embed = self.embed_grids_with_parsed_manuals(grids, parsed_manuals)
         elif self.manuals == 'embed':
-            grids_embed = self.embed_grids_with_embedded_manuals(grids, embedded_manuals)
+            grids_embed = self.embed_grids_with_embedded_manuals(grids, embedded_manuals, manuals_attn_mask)
         elif self.manuals == 'none':
             grids_embed = self.embed_grids_without_manuals(grids)
         else:
@@ -473,9 +629,7 @@ class WorldModel(WorldModelBase):
         b, h, w, c = grids.shape
         entity_per_channel, _ = grids[...,:-1].flatten(1, 2).max(1)
         new_parsed_manuals = []
-        #print(ENTITY_IDS)
         for i, triplet in enumerate(parsed_manuals):
-            #print(i, triplet, entity_per_channel[i])
             new_triplet = []
             for r in entity_per_channel[i].tolist():
                 if r == 0:
@@ -486,14 +640,38 @@ class WorldModel(WorldModelBase):
                     if e[0] in ENTITY_IDS and ENTITY_IDS[e[0]] == r:
                         new_triplet[-1] = e
                         break
-            #print(new_triplet)
             assert len(new_triplet) == 3
             new_parsed_manuals.append(new_triplet)
         return new_parsed_manuals
 
+    def make_true_attention(self, grids, true_parsed_manuals):
+        b, h, w, c = grids.shape
+        self.true_attn = torch.zeros((b, c - 1, c)).to(self.device)
+        entities_batch = grids.view(b, -1, c).max(1)[0].tolist()
+        for k, entities in enumerate(entities_batch):
+            for i, e_grid in enumerate(entities[:-1]):
+                if e_grid in [0, 15, 16]:
+                    self.true_attn[k, i, -1] = 1
+                else:
+                    pos = -1
+                    for j, e_manual in enumerate(true_parsed_manuals[k]):
+                        if ENTITY_IDS[e_manual[0]] == e_grid:
+                            pos = j
+                            break
+                    #assert pos is not None
+                    self.true_attn[k, i, pos] = 1
+        """
+        print(ENTITY_IDS)
+        print(true_parsed_manuals[5])
+        print(entities_batch[5])
+        print(self.true_attn[5])
+        print()
+        """
+
     def step(self,
             old_grids,
             embedded_manuals,
+            manuals_attn_mask,
             parsed_manuals,
             true_parsed_manuals,
             actions,
@@ -502,6 +680,8 @@ class WorldModel(WorldModelBase):
             dones,
             backprop_idxs):
 
+        self.make_true_attention(old_grids, true_parsed_manuals)
+        orig_true_parsed_manuals = deepcopy([true_parsed_manuals[i] for i in backprop_idxs])
 
         if parsed_manuals is not None:
             parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, grids)
@@ -510,6 +690,7 @@ class WorldModel(WorldModelBase):
         logits, (self.hidden_states, self.cell_states) = self.forward(
             old_grids,
             embedded_manuals,
+            manuals_attn_mask,
             parsed_manuals,
             actions,
             (self.hidden_states, self.cell_states),
@@ -563,5 +744,33 @@ class WorldModel(WorldModelBase):
                             k = ENTITY_IDS[e[0]]
                         preds['id'][i, j, k] = 1.
                 preds['grid'] = self.predict_grid(preds)
+
+            # attention
+            preds['attn'] = self.attn[backprop_idxs][0]
+            preds['true_attn'] = torch.zeros_like(preds['attn'])
+            entities = old_grids[backprop_idxs][0].view(-1, grids.shape[-1]).max(0)[0].tolist()
+            preds['entities'] = entities
+            for i, e_grid in enumerate(entities[:-1]):
+                if e_grid in [0, 15, 16]:
+                    preds['true_attn'][i, -1] = 1
+                else:
+                    pos = None
+                    for j, e_manual in enumerate(orig_true_parsed_manuals[0]):
+                        if ENTITY_IDS[e_manual[0]] == e_grid:
+                            pos = j
+                            break
+                    assert pos is not None
+                    preds['true_attn'][i, pos] = 1
+
+            preds['attn'] = torch.cat((preds['attn'], preds['true_attn']), dim=0)
+
+            """
+            print(ENTITY_IDS)
+            print(orig_true_parsed_manuals[0])
+            print(entities)
+            print(preds['attn'])
+            print()
+            """
+
 
         return preds, targets

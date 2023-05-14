@@ -11,4 +11,6 @@
 python3 -u train_khanh.py \
                    --dataset_path custom_dataset/dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle \
                    --exp_name embed_shuffle_balanced_intentions_10k_train_500_eval \
-                   --manuals embed
+                   --manuals embed \
+                   --batch_size 32 \
+                   --eval_batch_size 32

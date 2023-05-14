@@ -41,6 +41,9 @@ def train(args):
 
     world_model = WorldModel(args).to(args.device)
     print(world_model)
+    total_params = sum(p.numel() for p in world_model.parameters())
+    print('Total params', total_params)
+
 
     # Text Encoder
     manuals_encoder_model = AutoModel.from_pretrained("bert-base-uncased")
@@ -81,6 +84,7 @@ def train(args):
         mode="random",
         start_state=args.train_start_state,
         batch_size=args.batch_size,
+        #max_rollouts=100
     )
 
     eval_dataloaders = {}
@@ -104,7 +108,8 @@ def train(args):
 
     # load initial data
     manuals, true_parsed_manuals, grids = train_dataloader.reset()
-    embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+    manuals = process_manuals(args, manuals, true_parsed_manuals)
+    embedded_manuals, manuals_attn_mask = encode_manuals(args, manuals, manuals_encoder)
 
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
 
@@ -141,7 +146,7 @@ def train(args):
                 eval_world_model.load_state_dict(world_model.state_dict())
 
                 with torch.no_grad():
-                    eval_metric = evaluate(
+                    eval_metric, extra_info = evaluate(
                         args,
                         eval_split,
                         step,
@@ -154,6 +159,11 @@ def train(args):
                     for k in eval_metric:
                         wandb_stats[('%s/' % eval_split) + k] = eval_metric[k]
                         wandb_stats[('%s_best/' % eval_split) + k] = best_metric[eval_split][k]
+                    if args.manuals == 'embed':
+                        random.shuffle(extra_info)
+                        for i, (x, y) in enumerate(extra_info[:10]):
+                            image = wandb.Image(x, caption=' '.join([str(j) for j in y]))
+                            wandb_stats['attn_%s_%d' % (eval_split, i)] = image
 
             if args.use_wandb:
                 wandb.log(wandb_stats)
@@ -164,7 +174,8 @@ def train(args):
         # load next-step data
         old_tensor_grids = tensor_grids
         manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
-        embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+        manuals = process_manuals(args, manuals, true_parsed_manuals)
+        embedded_manuals, manuals_attn_mask = encode_manuals(args, manuals, manuals_encoder)
 
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
@@ -178,6 +189,7 @@ def train(args):
             world_model.step(
                 old_tensor_grids,
                 embedded_manuals,
+                manuals_attn_mask,
                 parsed_manuals,
                 true_parsed_manuals,
                 tensor_actions,
@@ -207,12 +219,16 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     world_model.eval()
 
     manuals, true_parsed_manuals, grids, n_rollouts = dataloader.reset()
-    embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+    manuals = process_manuals(args, manuals, true_parsed_manuals)
+    embedded_manuals, manuals_attn_mask = encode_manuals(args, manuals, manuals_encoder)
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
+    attentions = []
 
     world_model.state_reset(tensor_grids)
 
     metrics = defaultdict(list)
+
+    step = 0
     while True:
 
         old_tensor_grids = tensor_grids
@@ -222,7 +238,8 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
         if all_complete:
             break
 
-        embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
+        manuals = process_manuals(args, manuals, true_parsed_manuals)
+        embedded_manuals, manuals_attn_mask = encode_manuals(args, manuals, manuals_encoder)
 
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
         tensor_grids = torch.from_numpy(grids).long().to(args.device)
@@ -237,6 +254,7 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
             preds, targets = world_model.step(
                 old_tensor_grids,
                 embedded_manuals,
+                manuals_attn_mask,
                 parsed_manuals,
                 true_parsed_manuals,
                 tensor_actions,
@@ -247,6 +265,9 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
             )
 
             add_eval_metrics(metrics, preds, targets, timesteps[cur_idxs])
+
+            if args.manuals == 'embed' and step % 100 == 0:
+                attentions.append((preds['attn'], preds['entities']))
 
         world_model.state_reset(tensor_grids, new_idxs)
 
@@ -280,9 +301,16 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     print(log_str)
 
     # evaluate grounding
+    """
     if args.manuals == 'embed':
         avg_metric['grounding'] = evaluate_grounding(args, world_model, manuals_encoder, dataloader)
-    return avg_metric
+    """
+
+    extra_info = None
+    if args.manuals == 'embed':
+        extra_info = attentions
+
+    return avg_metric, attentions
 
 def evaluate_grounding(args, world_model, manuals_encoder, dataloader):
     entity_ids = list(ENTITY_IDS.values())
@@ -302,7 +330,7 @@ def evaluate_grounding(args, world_model, manuals_encoder, dataloader):
                     break
         if not found:
             raise RuntimeError
-    
+
     # compute grounding
     entity_query = world_model.entity_query_embeddings(torch.tensor(entity_ids).to(args.device)) # 12 x key_dim
     desc_key = torch.sum(world_model.token_key_att(embedded_manual)*world_model.token_key(embedded_manual), dim=-2) # 12 x key_dim
@@ -310,11 +338,21 @@ def evaluate_grounding(args, world_model, manuals_encoder, dataloader):
     desc_att = F.softmax(desc_att_logits / np.sqrt(world_model.desc_key_dim), dim=-1)
     return wandb.Image(desc_att.unsqueeze(0))
 
+def process_manuals(args, manuals, true_parsed_manuals):
+    if args.pretrain_with_entity_manual:
+        for i in range(len(manuals)):
+            manuals[i] = [e[0] for e in true_parsed_manuals[i]]
+    return manuals
+
 def encode_manuals(args, manuals, manuals_encoder):
+    manuals_with_dummy = []
+    for m in manuals:
+        manuals_with_dummy.append(m + ['none'])
     if args.manuals == 'embed':
-        embedded_manuals, _ = manuals_encoder.encode(manuals)
-        return embedded_manuals
-    return None
+        embedded_manuals, _, manuals_attn_mask = manuals_encoder.encode(manuals_with_dummy)
+        manuals_attn_mask = (1 - manuals_attn_mask).bool()
+        return embedded_manuals, manuals_attn_mask
+    return None, None
 
 def get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings):
     if args.manuals == 'gpt':
@@ -425,6 +463,12 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", default=0, type=float, help="World model weight decay.")
     parser.add_argument("--reward_loss_weight", default=1, type=float, help="World model reward loss weight.")
     parser.add_argument("--done_loss_weight", default=1, type=float, help="World model done loss weight.")
+    parser.add_argument("--use_true_attention", default=0, type=int, help="Use true attention")
+    parser.add_argument("--train_id_loss_only", default=0, type=int, help="Pretrain with only id loss")
+    parser.add_argument("--train_loc_loss_only", default=0, type=int, help="Pretrain with only loc loss")
+    parser.add_argument("--train_reward_and_done_losses_only", default=0, type=int)
+    parser.add_argument("--train_all_losses_except_loc", default=0, type=int, help="Pretrain with all losses except loc")
+    parser.add_argument("--pretrain_with_entity_manual", default=0, type=int)
 
     # Dataset arguments
     parser.add_argument("--dataset_path", default="custom_dataset/dataset_64x.pickle", help="path to the dataset file")
@@ -443,7 +487,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_frames', default=64, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
-    parser.add_argument('--use_wandb', type=int, default=1, help='log to wandb?')
+    parser.add_argument('--use_wandb', type=int, default=0, help='log to wandb?')
 
     args = parser.parse_args()
 
@@ -475,6 +519,8 @@ if __name__ == "__main__":
         wandb.config.update(args)
 
     print(pprint.pformat(vars(args), indent=2))
+
+    torch.set_printoptions(precision=2)
 
     # train
     train(args)

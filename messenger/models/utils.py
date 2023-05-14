@@ -10,7 +10,7 @@ class ObservationBuffer:
     are currently expected to be a dict of np arrays. Currently keeps
     observations in a list and then stacks them via torch.stack().
     TODO: pre-allocate memory for faster calls to get_obs().
-    
+
     Parameters:
     buffer_size
         How many previous observations to track in the buffer
@@ -49,10 +49,10 @@ class Encoder:
     '''
     Text-encoder class with caching for fast sentence-encoding.
     self.encoder and self.tokenizer are expected to be HuggingFace model
-    and its respective tokenizer. 
-    
+    and its respective tokenizer.
+
     Warning: currently have not implemented max cache size, watch out for
-    out of memory errors if the number of possible inputs is v. large. All 
+    out of memory errors if the number of possible inputs is v. large. All
     original Messenger descriptions combined should take < 2GB of GPU memory.
     '''
     def __init__(self, model, tokenizer, device: torch.device, max_length:int=36):
@@ -69,6 +69,7 @@ class Encoder:
         return self
 
     def tokens_to_device(self, tokens):
+        print(tokens.keys())
         tok_device = {}
         for key in tokens:
             tok_device[key] = tokens[key].to(self.device)
@@ -85,7 +86,7 @@ class Encoder:
             if sent in self.cache.keys(): # sentence is in cache
                 encoded.append(self.cache[sent])
                 tokenized.append(self.tokens_cache[sent])
-            else: 
+            else:
                 with torch.no_grad():
                     tokens = self.tokenizer(
                         sent,
@@ -107,10 +108,10 @@ class BatchedEncoder:
     '''
     Text-encoder class with caching for fast sentence-encoding.
     self.encoder and self.tokenizer are expected to be HuggingFace model
-    and its respective tokenizer. 
-    
+    and its respective tokenizer.
+
     Warning: currently have not implemented max cache size, watch out for
-    out of memory errors if the number of possible inputs is v. large. All 
+    out of memory errors if the number of possible inputs is v. large. All
     original Messenger descriptions combined should take < 2GB of GPU memory.
     '''
     def __init__(self, model, tokenizer, device: torch.device, max_length:int=36):
@@ -120,6 +121,7 @@ class BatchedEncoder:
         self.max_length = max_length # max sentence length
         self.cache = {}
         self.tokens_cache = {}
+        self.mask_cache = {}
 
     def to(self, device):
         self.device = device
@@ -139,14 +141,17 @@ class BatchedEncoder:
         '''
         encodeds = [] # the final encoded texts
         tokenizeds = [] # the corresponding tokens
+        attention_masks = []
         for text in texts:
             encoded = []
             tokenized = []
+            masks = []
             for sent in text:
                 if sent in self.cache.keys(): # sentence is in cache
                     encoded.append(self.cache[sent])
                     tokenized.append(self.tokens_cache[sent])
-                else: 
+                    masks.append(self.mask_cache[sent])
+                else:
                     with torch.no_grad():
                         tokens = self.tokenizer(
                             sent,
@@ -156,15 +161,21 @@ class BatchedEncoder:
                             padding="max_length",
                             max_length=self.max_length
                         )
-                        emb = self.encoder(**self.tokens_to_device(tokens)).last_hidden_state
+                        tokens_device = self.tokens_to_device(tokens)
+                        attn_mask = tokens_device['attention_mask']
+                        emb = self.encoder(**tokens_device).last_hidden_state
                         tokens = self.tokenizer.convert_ids_to_tokens(tokens.input_ids[0])
                     encoded.append(emb)
                     tokenized.append(tokens)
+                    masks.append(attn_mask)
                     self.cache[sent] = emb
                     self.tokens_cache[sent] = tokens
+                    self.mask_cache[sent] = attn_mask
             encodeds.append(torch.stack(encoded, dim=0))
             tokenizeds.append(tokenized)
-        return torch.stack(encodeds, dim=0).squeeze(dim=2), tokenizeds
+            attention_masks.append(torch.cat(masks, dim=0))
+        attention_masks = torch.stack(attention_masks)
+        return torch.stack(encodeds, dim=0).squeeze(dim=2), tokenizeds, attention_masks
 
 def nonzero_mean(emb):
     '''
