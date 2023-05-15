@@ -94,7 +94,7 @@ class StageTwoCustom(MessengerEnv):
 
         with open(self.this_folder.joinpath("texts", "custom_text_splits", "custom_text_splits.json"), "r") as f:
             self.custom_text_splits = json.load(f)
-        
+
         self.init_states = [
             str(path) for path in self.this_folder.joinpath("vgdl_files", "stage_2", "init_states").glob("*.txt")
         ]
@@ -174,8 +174,8 @@ class StageTwoCustom(MessengerEnv):
         with open(game_file_path, 'w') as f:
             f.write(GAME_FILE_TEMPLATE % (
                 VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['enemy'][1]],
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['message'][1]], 
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['goal'][1]], 
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['message'][1]],
+                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['goal'][1]],
             ))
 
         # args that will go into VGDL Env.
@@ -189,14 +189,17 @@ class StageTwoCustom(MessengerEnv):
         self.env = VGDLEnv(**self._envargs)
         vgdl_obs = self.env.reset()
 
-        os.remove(game_file_path)
+        try:
+            os.remove(game_file_path)
+        except:
+            pass
 
         manual = [random.choice(self.custom_text_splits[entity[0]][entity[1]][entity[2]][split]) for entity in entities]
         ground_truth = [(entity[0], entity[1], entity[2]) for entity in entities]
-            
+
         return self._convert_obs(vgdl_obs), manual, ground_truth
 
     def step(self, action):
         vgdl_obs, reward, done, info = self.env.step(action)
         return self._convert_obs(vgdl_obs), reward, done, info
-    
+

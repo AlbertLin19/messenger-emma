@@ -390,7 +390,7 @@ class WorldModel(WorldModelBase):
 
         return roles_embed + movements_embed + positions_embed + ids_embed
 
-    
+
     def embed_grids_without_manuals(self, grids):
 
         b, h, w, c = grids.shape
@@ -449,7 +449,7 @@ class WorldModel(WorldModelBase):
         nonexistence_logits = nonexistence_logits.unsqueeze(-1)
         location_logits = torch.cat((grid_logits, nonexistence_logits), dim=-1)
         return location_logits
-    
+
     def create_loc_logits_and_targets(self, grid_logits, nonexistence_logits, grids):
 
         grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
@@ -584,7 +584,7 @@ class WorldModel(WorldModelBase):
             raise NotImplementedError
 
         parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, old_grids)
-        
+
         logits, (self.hidden_states, self.cell_states) = self.forward(
             old_grids,
             None,
@@ -598,11 +598,27 @@ class WorldModel(WorldModelBase):
             logits['nonexistence']
         )
 
+        """
+        print(logits['loc'].shape)
+        b, c, _ = logits['loc'].shape
+        loc_probs = logits['loc'].softmax(-1)[...,:-1].view(b, c, H, W)
+        print(loc_probs[0][0])
+        print(loc_probs[0][1])
+        print(loc_probs[0][2])
+        """
+
         with torch.no_grad():
             preds = {}
             preds['loc'] = logits['loc'].softmax(dim=-1)
             preds['reward'] = logits['reward'].detach()
-            preds['done'] = torch.sigmoid(logits['done'])
+
+            done_dist = torch.distributions.Bernoulli(logits=logits['done'])
+            if sample:
+                preds['done'] = done_dist.sample().long()
+            else:
+                preds['done'] = (logits['done'].sigmoid() > 0.5).long()
+                #print('asdfa', preds['done'])
+
             preds['id'] = logits['id'].softmax(dim=-1)
             # oracle or gpt manuals: use parsed_manuals to overwrite id predictions
             if parsed_manuals is not None:

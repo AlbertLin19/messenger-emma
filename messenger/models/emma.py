@@ -17,7 +17,7 @@ from messenger.models.utils import nonzero_mean, Encoder
 class EMMA(nn.Module):
     def __init__(self, state_h=10, state_w=10, action_dim=5, hist_len=3, n_latent_var=128,
                 emb_dim=256, f_maps=64, kernel_size=2, n_hidden_layers=1, device=None):
-        
+
         super().__init__()
 
         # calculate dimensions after flattening the conv layer output
@@ -30,9 +30,9 @@ class EMMA(nn.Module):
         self.action_dim = action_dim
         self.emb_dim = emb_dim
         self.attn_scale = sqrt(emb_dim)
-    
+
         self.sprite_emb = nn.Embedding(25, emb_dim, padding_idx=0) # sprite embedding layer
-        
+
         hidden_layers = (nn.Linear(n_latent_var, n_latent_var), nn.LeakyReLU())*n_hidden_layers
         self.action_layer = nn.Sequential(
                 nn.Linear(lin_dim, n_latent_var),
@@ -41,8 +41,8 @@ class EMMA(nn.Module):
                 nn.Linear(n_latent_var, action_dim),
                 nn.Softmax(dim=-1)
                 )
-        
-        # critic 
+
+        # critic
         self.value_layer = nn.Sequential(
                 nn.Linear(lin_dim, n_latent_var),
                 nn.LeakyReLU(),
@@ -56,7 +56,7 @@ class EMMA(nn.Module):
             nn.Linear(768, 1),
             nn.Softmax(dim=-2)
         )
-        
+
         self.txt_val = nn.Linear(768, emb_dim)
         self.scale_val = nn.Sequential(
             nn.Linear(768, 1),
@@ -93,7 +93,7 @@ class EMMA(nn.Module):
         kq = kq / self.attn_scale # scale to prevent vanishing grads
         weights = F.softmax(kq, dim=-1) * mask
         return torch.mean(weights.unsqueeze(-1) * value, dim=-2), weights
-        
+
     def forward(self, obs, manual, deterministic=False, temperature=False):
         # encoder the text
         temb, _ = self.encoder.encode(manual)
@@ -108,17 +108,17 @@ class EMMA(nn.Module):
         # take the non_zero mean of embedded objects, which will act as attention query
         query = nonzero_mean(self.sprite_emb(entity_obs))
 
-        # Attention        
+        # Attention
         key = self.txt_key(temb)
         key_scale = self.scale_key(temb) # (num sent, sent_len, 1)
         key = key * key_scale
         key = torch.sum(key, dim=1)
-        
+
         value = self.txt_val(temb)
         val_scale = self.scale_val(temb)
         value = value * val_scale
         value = torch.sum(value, dim=1)
-        
+
         obs_emb, weights = self.attention(query, key, value)
 
         # compress the channels from KHWC to HWC' where K is history length
@@ -129,12 +129,15 @@ class EMMA(nn.Module):
         # permute from HWC to NCHW and do convolution
         obs_emb = obs_emb.permute(2, 0, 1).unsqueeze(0)
         obs_emb = F.leaky_relu(self.conv(obs_emb)).view(-1)
-        
+
         action_probs = self.action_layer(obs_emb)
 
         if temperature:
-            action_probs = torch.softmax(torch.log(action_probs) / temperature, dim=-1)
-            return np.random.choice(range(len(action_probs)), p=action_probs.detach().cpu().numpy())
+            action_logits = action_probs.log() / temperature
+            action_dists = Categorical(logits=action_logits)
+            actions = action_dists.sample()
+            return actions.item()
+            #return np.random.choice(range(len(action_probs)), p=action_probs.detach().cpu().numpy())
 
         action = torch.argmax(action_probs).item()
         if deterministic:
