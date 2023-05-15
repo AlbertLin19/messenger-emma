@@ -383,7 +383,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_policy_samples", default=20, type=int, help="number of policy samples to evaluate")
     parser.add_argument("--max_lookahead_length", default=5, type=int, help="maximum steps to lookahead")
     parser.add_argument("--max_steps", default=64, type=int, help="max length of an episode")
-    parser.add_argument("--max_episodes", default=50, type=int)
+    parser.add_argument("--max_episodes", default=100000, type=int)
 
     args = parser.parse_args()
     args.device = torch.device(f"cuda:{args.device}")
