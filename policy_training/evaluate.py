@@ -379,9 +379,9 @@ if __name__ == "__main__":
     parser.add_argument("--splits_path", default="../offline_training/custom_dataset/data_splits_final_with_test.json", help="path to data splits")
 
     # Evaluation arguments
-    parser.add_argument("--policy_temperature", default=1, type=float, help="temperature of the policy (logits scaling)")
+    parser.add_argument("--policy_temperature", default=5, type=float, help="temperature of the policy (logits scaling)")
     parser.add_argument("--num_policy_samples", default=20, type=int, help="number of policy samples to evaluate")
-    parser.add_argument("--max_lookahead_length", default=32, type=int, help="maximum steps to lookahead")
+    parser.add_argument("--max_lookahead_length", default=5, type=int, help="maximum steps to lookahead")
     parser.add_argument("--max_steps", default=64, type=int, help="max length of an episode")
     parser.add_argument("--max_episodes", default=50, type=int)
 
