@@ -223,8 +223,8 @@ class PolicyWithWorldModel:
         grids = self._make_grids(obs)
         rewards = self._simulate_and_evaluate(manual, grids, buffer)
         best_action = np.argmax(np.array(rewards))
-        print(grids[0].sum(-1))
-        print(best_action)
+        # print(grids[0].sum(-1))
+        # print(best_action)
         best_actions = best_action * torch.ones(self.batch_size).to(self.device).long()
         with torch.no_grad():
             preds = self.world_model.pred(
@@ -233,7 +233,7 @@ class PolicyWithWorldModel:
                 best_actions,
                 sample=False # not important
             )
-        print(preds['reward'][0])
+        # print(preds['reward'][0])
         return best_action
 
 
@@ -298,7 +298,7 @@ def evaluate(args):
 
     for split in splits:
         print('evaluating', split)
-        if 'train' in split:
+        if 'train' in split or 'dev' in split:
             print('skipping...')
             continue
 
@@ -388,7 +388,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.device = torch.device(f"cuda:{args.device}")
     if args.output_folder is None:
-        args.output_folder = f"evaluation/{os.path.basename(args.load_state).split('.')[0]}_{os.path.basename(args.world_model_load_model_from).split('.')[0]}_{int(time.time())}/"
+        args.output_folder = f"evaluation/{os.path.basename(args.load_state).split('.')[0]}_policy_{os.path.basename(args.world_model_load_model_from).split('.')[0]}_worldmodel_tp{int(args.policy_temperature)}_ps{args.num_policy_samples}_la{args.max_lookahead_length}/"
     os.makedirs(args.output_folder)
 
     print(pprint.pformat(vars(args), indent=2))

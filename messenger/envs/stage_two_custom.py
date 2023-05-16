@@ -170,7 +170,7 @@ class StageTwoCustom(MessengerEnv):
             raise RuntimeError
         self.game = get_game((ENTITY_KEYWORD_TABLE[entities_by_role['enemy'][0]], ENTITY_KEYWORD_TABLE[entities_by_role['message'][0]], ENTITY_KEYWORD_TABLE[entities_by_role['goal'][0]]))
 
-        game_file_path = self.this_folder.joinpath('custom_game_file.txt')
+        game_file_path = self.this_folder.joinpath(f'custom_game_file_{os.getpid()}.txt')
         with open(game_file_path, 'w') as f:
             f.write(GAME_FILE_TEMPLATE % (
                 VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['enemy'][1]],
