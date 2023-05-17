@@ -570,7 +570,7 @@ class WorldModel(WorldModelBase):
                         else:
                             k = ENTITY_IDS[e[0]]
                         preds['id'][i, j, k] = 1.
-                preds['grid'] = self.predict_grid(preds)
+            preds['grid'] = self.predict_grid(preds)
 
         return preds, targets
 
