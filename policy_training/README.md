@@ -18,3 +18,6 @@ Note: We run EMMA on stage 1 for 12 hours, but this is to make comparisons with 
 
 ## Results
 You can see the training curves generated using the provided scripts at [this wandb project](https://wandb.ai/ahjwang/msgr-emma?workspace=user-ahjwang)
+
+# Evaluating EMMA policy with World Model Supervision
+Run [evaluate.py](./evaluate.py) with the appropriate arguments. See evaluate_*.sh bash scripts as examples.

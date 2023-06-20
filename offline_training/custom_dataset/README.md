@@ -1,0 +1,2 @@
+# Dataset Generation
+Run [generate_custom_dataset.py](./generate_custom_dataset.py) to generate a dataset pickle in this directory according to the game splits defined in [data_splits_final_with_test.json](./data_splits_final_with_test.json).
