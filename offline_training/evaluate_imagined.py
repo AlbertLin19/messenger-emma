@@ -228,7 +228,10 @@ def evaluate(args):
             avg_metric[k] = np.average(metrics[k])
             if 'reward' not in k:
                 avg_metric[k.replace('loss', 'perp')] = math.exp(avg_metric[k])
-        loc_perps = [avg_metric["loc_loss_len_%d" % t] for t in range(1, args.max_rollout_length)]
+        loc_ces = [avg_metric["loc_loss_len_%d" % t] for t in range(1, args.max_rollout_length)]
+        with open(os.path.join(args.output_folder, f'{split}_loc_ces.json'), 'w') as f:
+            json.dump(loc_ces, f)
+        loc_perps = [avg_metric["loc_perp_len_%d" % t] for t in range(1, args.max_rollout_length)]
         with open(os.path.join(args.output_folder, f'{split}_loc_perps.json'), 'w') as f:
             json.dump(loc_perps, f)
 
