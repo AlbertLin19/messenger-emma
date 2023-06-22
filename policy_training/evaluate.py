@@ -24,7 +24,7 @@ import torch
 from transformers import AutoModel, AutoTokenizer
 import numpy as np
 
-from offline_training.batched_world_model.model_khanh import WorldModel
+from offline_training.batched_world_model.model_new import WorldModel
 from messenger.models.utils import ObservationBuffer
 
 import matplotlib.pyplot as plt

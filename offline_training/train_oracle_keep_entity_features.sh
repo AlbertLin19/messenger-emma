@@ -8,7 +8,7 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
-python3 -u train_khanh.py \
+python3 -u train_new.py \
                    --dataset_path custom_dataset/dataset_shuffle_10k_train_500_eval.pickle \
                    --exp_name oracle_keep_features_shuffle_10k_train_500_eval \
                    --manuals oracle \

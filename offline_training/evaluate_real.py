@@ -21,7 +21,7 @@ from transformers import AutoModel, AutoTokenizer
 import numpy as np
 import math
 
-from offline_training.batched_world_model.model_khanh import WorldModel
+from offline_training.batched_world_model.model_new import WorldModel
 from chatgpt_groundings.utils import ENTITY_GROUNDING_LOOKUP, MOVEMENT_GROUNDING_LOOKUP, ROLE_GROUNDING_LOOKUP
 from dataloader import DataLoader
 

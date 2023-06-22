@@ -22,9 +22,9 @@ sys.path.append('..')
 
 from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
-from offline_training.batched_world_model.model_khanh import ENTITY_IDS
+from offline_training.batched_world_model.model_new import ENTITY_IDS
 from messenger.models.utils import BatchedEncoder
-from offline_training.batched_world_model.model_khanh import WorldModel
+from offline_training.batched_world_model.model_new import WorldModel
 from dataloader import DataLoader
 from evaluator import Evaluator
 

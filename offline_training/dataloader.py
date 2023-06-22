@@ -1,7 +1,7 @@
 import numpy as np
 from tqdm import tqdm
 
-# mappings from Jens keywords to Messenger keywords
+# mappings from custom keywords to Messenger keywords
 CUSTOM_TO_MESSENGER_ENTITY = {
     "robot": "robot",
     "airplane": "airplane",

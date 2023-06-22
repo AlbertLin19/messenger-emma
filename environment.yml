@@ -89,4 +89,4 @@ dependencies:
       - urllib3==1.26.15
       - vgdl==2.0.1.dev19
       - wandb==0.14.2
-prefix: /n/fs/nlp-aklin/miniconda3/envs/messenger
+prefix: ~/miniconda3/envs/messenger

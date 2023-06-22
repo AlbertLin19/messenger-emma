@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ENTITY="aklin" # replace with your wandb entity
+ENTITY="entity" # replace with your wandb entity
 LOG_GROUP="emma_s2" # group to log runs in wandb
 SLURM_ARGS="-A pnlp" # replace with your slurm args
 
