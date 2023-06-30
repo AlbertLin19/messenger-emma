@@ -68,7 +68,8 @@ class WorldModelBase(nn.Module):
         return loss
 
     def reward_loss(self, preds, targets):
-        return F.mse_loss(preds, targets, reduction='sum') / self.batch_size
+        #return F.mse_loss(preds, targets, reduction='sum') / self.batch_size
+        return F.cross_entropy(preds, targets, reduction='sum') / self.batch_size
 
     def done_loss(self, logits, targets):
         return F.binary_cross_entropy_with_logits(logits, targets, reduction='sum') / self.batch_size
@@ -202,8 +203,10 @@ class WorldModel(WorldModelBase):
         )
 
         self.action_embeddings = nn.Embedding(5, action_embed_dim)
+        self.reward_embeddings = nn.Embedding(5, action_embed_dim)
+
         self.lstm = nn.LSTM(
-            hidden_size + action_embed_dim,
+            hidden_size + action_embed_dim * 2,
             hidden_size,
         )
 
@@ -237,15 +240,15 @@ class WorldModel(WorldModelBase):
         self.reward_head = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
-            nn.Linear(hidden_size, 1),
-            nn.Flatten(start_dim=0, end_dim=-1),
+            nn.Linear(hidden_size, 5),
+            #nn.Flatten(start_dim=0, end_dim=-1),
         )
 
         self.done_head = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, 1),
-            nn.Flatten(start_dim=0, end_dim=-1),
+            nn.Flatten(start_dim=0),
         )
 
         # training parameters
@@ -409,7 +412,7 @@ class WorldModel(WorldModelBase):
         return positions_embed + ids_embed
 
 
-    def forward(self, grids, embedded_manuals, parsed_manuals, actions, lstm_states):
+    def forward(self, grids, rewards, embedded_manuals, parsed_manuals, actions, lstm_states):
 
         if self.manuals in ['gpt', 'oracle']:
             grids_embed = self.embed_grids_with_parsed_manuals(grids, parsed_manuals)
@@ -423,9 +426,10 @@ class WorldModel(WorldModelBase):
         latents = self.encoder(grids_embed)
         latents = self.before_lstm_projector(latents)
 
+        rewards = self.reward_embeddings(rewards)
         actions = self.action_embeddings(actions)
 
-        mem_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
+        mem_ins = torch.cat((latents, actions, rewards), dim=-1).unsqueeze(0)
         mem_outs, (hidden_states, cell_states) = self.lstm(mem_ins, lstm_states)
         mem_outs = mem_outs.squeeze(0)
 
@@ -499,8 +503,14 @@ class WorldModel(WorldModelBase):
             new_parsed_manuals.append(new_triplet)
         return new_parsed_manuals
 
+    def reward_to_label(self, x):
+        for i in range(x.shape[0]):
+            x[i] = (x[i] + 1) * 2
+        return x.long()
+
     def step(self,
             old_grids,
+            old_rewards,
             embedded_manuals,
             parsed_manuals,
             true_parsed_manuals,
@@ -510,6 +520,7 @@ class WorldModel(WorldModelBase):
             dones,
             backprop_idxs):
 
+        old_rewards = self.reward_to_label(old_rewards)
 
         if parsed_manuals is not None:
             parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, grids)
@@ -517,6 +528,7 @@ class WorldModel(WorldModelBase):
 
         logits, (self.hidden_states, self.cell_states) = self.forward(
             old_grids,
+            old_rewards,
             embedded_manuals,
             parsed_manuals,
             actions,
@@ -543,6 +555,7 @@ class WorldModel(WorldModelBase):
             true_parsed_manuals
         )
         targets['reward'] = rewards[backprop_idxs]
+        targets['reward'] = self.reward_to_label(targets['reward'])
         targets['done'] = dones[backprop_idxs].float()
 
         for k in targets:

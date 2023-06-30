@@ -42,6 +42,11 @@ def train(args):
     world_model = WorldModel(args).to(args.device)
     print(world_model)
 
+    if args.load_model_from:
+        model_state_dict = torch.load(args.load_model_from)
+        world_model.load_state_dict(model_state_dict)
+        print('Loaded model from', args.load_model_from)
+
     # Text Encoder
     manuals_encoder_model = AutoModel.from_pretrained("bert-base-uncased")
     manuals_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
@@ -67,7 +72,9 @@ def train(args):
     # list of splits
     splits = list(dataset["rollouts"].keys())
     # exclude all test splits
-    splits = [split for split in splits if "test" not in split]
+    exclude_split = 'dev' if args.eval_mode else 'test'
+    splits = [split for split in splits if exclude_split not in split]
+    print('Included splits', splits)
     train_split = None
     for split in splits:
         if "train" in split:
@@ -109,6 +116,7 @@ def train(args):
     embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
 
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
+    tensor_rewards = torch.zeros(tensor_grids.shape[0]).float().to(args.device)
 
     # reset world_model hidden states
     world_model.state_reset(tensor_grids)
@@ -160,11 +168,16 @@ def train(args):
             if args.use_wandb:
                 wandb.log(wandb_stats)
 
+        if args.eval_mode:
+            break
+
         # TRAIN
         world_model.train()
 
-        # load next-step data
         old_tensor_grids = tensor_grids
+        old_tensor_rewards = tensor_rewards
+
+        # load next-step data
         manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
         embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
 
@@ -179,6 +192,7 @@ def train(args):
         if cur_idxs.tolist():
             world_model.step(
                 old_tensor_grids,
+                old_tensor_rewards,
                 embedded_manuals,
                 parsed_manuals,
                 true_parsed_manuals,
@@ -211,6 +225,7 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     manuals, true_parsed_manuals, grids, n_rollouts = dataloader.reset()
     embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
+    tensor_rewards = torch.zeros(tensor_grids.shape[0]).float().to(args.device)
 
     world_model.state_reset(tensor_grids)
 
@@ -218,6 +233,8 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     while True:
 
         old_tensor_grids = tensor_grids
+        old_tensor_rewards = tensor_rewards
+
         (manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs),
         timesteps, just_completes, all_complete) = dataloader.step()
 
@@ -238,6 +255,7 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
 
             preds, targets = world_model.step(
                 old_tensor_grids,
+                old_tensor_rewards,
                 embedded_manuals,
                 parsed_manuals,
                 true_parsed_manuals,
@@ -255,8 +273,7 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     avg_metric = {}
     for k in metrics:
         avg_metric[k] = np.average(metrics[k])
-        if 'reward' not in k:
-            avg_metric[k.replace('loss', 'perp')] = math.exp(avg_metric[k])
+        avg_metric[k.replace('loss', 'perp')] = math.exp(avg_metric[k])
     avg_metric['total_loss'] = avg_metric['loc_loss'] + avg_metric['id_loss'] + avg_metric['reward_loss'] + avg_metric['done_loss']
 
     # update best model
@@ -265,8 +282,9 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
             best_metric[k] = avg_metric[k]
             if k in ['loc_loss', 'id_loss', 'total_loss']:
                 model_path = os.path.join(args.output, '%s_best_%s.ckpt' % (split, k))
-                torch.save(world_model.state_dict(), model_path)
-                print('Saved best %s %s to %s' % (split, k, model_path))
+                if not args.eval_mode:
+                    torch.save(world_model.state_dict(), model_path)
+                    print('Saved best %s %s to %s' % (split, k, model_path))
 
     print('  EVALUATION on %s' % split)
     logged_losses = ['total_loss', 'loc_loss', 'id_loss', 'reward_loss', 'done_loss']
@@ -304,7 +322,7 @@ def evaluate_grounding(args, world_model, manuals_encoder, dataloader):
                     break
         if not found:
             raise RuntimeError
-    
+
     # compute grounding
     entity_query = world_model.entity_query_embeddings(torch.tensor(entity_ids).to(args.device)) # 12 x key_dim
     desc_key = torch.sum(world_model.token_key_att(embedded_manual)*world_model.token_key(embedded_manual), dim=-2) # 12 x key_dim
@@ -385,7 +403,7 @@ def add_eval_metrics(metrics, preds, targets, timesteps):
                 )
 
     metrics['reward_loss'].extend(
-        F.mse_loss(
+        F.cross_entropy(
             preds['reward'],
             targets['reward'],
             reduction='none'
@@ -409,6 +427,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", default=123, type=int, help="Set the seed for the model and training.")
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
     parser.add_argument("--exp_name", type=str, help="experiment name")
+    parser.add_argument("--eval_mode", type=int, default=0, help="evaluation mode")
 
     # text config
     parser.add_argument("--manuals", type=str,
@@ -445,7 +464,7 @@ if __name__ == "__main__":
     parser.add_argument('--n_frames', default=64, type=int, help='number of frames to visualize')
     parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
-    parser.add_argument('--use_wandb', type=int, default=1, help='log to wandb?')
+    parser.add_argument('--use_wandb', type=int, default=0, help='log to wandb?')
 
     args = parser.parse_args()
 

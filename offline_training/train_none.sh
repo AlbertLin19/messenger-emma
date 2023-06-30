@@ -12,4 +12,4 @@ python3 -u train_khanh.py \
                    --dataset_path custom_dataset/dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle \
                    --exp_name none_shuffle_balanced_intentions_10k_train_500_eval \
                    --manuals none \
-                   --device 1
+                   --device 0

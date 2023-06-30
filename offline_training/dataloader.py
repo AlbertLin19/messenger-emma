@@ -103,7 +103,11 @@ class DataLoader:
                 self.timesteps = (np.random.rand(self.batch_size)*(self.rollout_lengths[self.indices] - 1)).astype(int)
             else:
                 raise NotImplementedError
-            return self.manuals_array[self.indices], self.ground_truths_array[self.indices], self.grid_sequences_array[self.indices, self.timesteps]
+            return (
+                self.manuals_array[self.indices],
+                self.ground_truths_array[self.indices],
+                self.grid_sequences_array[self.indices, self.timesteps]
+            )
         elif self.mode == "static":
             # keep track of available rollout indices
             self.avail_indices = np.arange(self.n_rollouts, dtype=int)
@@ -121,7 +125,12 @@ class DataLoader:
             else:
                 raise NotImplementedError
             nonnegative_indices = self.indices + (self.indices < 0)
-            return self.manuals_array[nonnegative_indices], self.ground_truths_array[nonnegative_indices], self.grid_sequences_array[nonnegative_indices, self.timesteps], self.n_rollouts
+            return (
+                self.manuals_array[nonnegative_indices],
+                self.ground_truths_array[nonnegative_indices],
+                self.grid_sequences_array[nonnegative_indices, self.timesteps],
+                self.n_rollouts
+            )
         else:
             raise NotImplementedError
 
