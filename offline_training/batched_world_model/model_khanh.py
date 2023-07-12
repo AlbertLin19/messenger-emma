@@ -1,3 +1,4 @@
+import random
 import math
 from pprint import pprint
 
@@ -7,7 +8,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 
-from offline_training.batched_world_model.modules import ResNetEncoder, ResNetDecoder
+from offline_training.batched_world_model.modules import ResNetEncoder, ResNetDecoder, LSTMDecoder
 from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
 
 from messenger.envs.config import NPCS, NO_MESSAGE, WITH_MESSAGE
@@ -32,6 +33,7 @@ H = 10
 W = 10
 GRID_CHANNELS = 4
 NUM_ENTITIES = 17
+DESCRIPTION_LENGTH = 14
 
 
 class WorldModelBase(nn.Module):
@@ -42,106 +44,61 @@ class WorldModelBase(nn.Module):
         out = embed.weight.index_select(0, x.reshape(-1))
         return out.reshape(x.shape + (-1,))
 
-    def loc_loss(self, logits, targets):
-        logits = logits.view(-1, logits.shape[-1])
-        targets  = targets.view(-1, targets.shape[-1])
-        loss = F.cross_entropy(logits, targets, reduction='sum') / (self.batch_size * GRID_CHANNELS)
-        return loss
-
-    def id_loss(self, logits, targets):
-
-        if self.manuals in ['gpt', 'oracle']:
-            normalizer = self.batch_size
-        else:
-            normalizer = self.batch_size * GRID_CHANNELS
-
-        logits = logits.view(-1, logits.shape[-1])
-        targets = targets.view(-1)
-
-        loss = F.cross_entropy(
-            logits,
-            targets,
-            ignore_index=-1,
-            reduction='sum'
-        ) / normalizer
-
-        return loss
-
-    def reward_loss(self, preds, targets):
-        #return F.mse_loss(preds, targets, reduction='sum') / self.batch_size
-        return F.cross_entropy(preds, targets, reduction='sum') / self.batch_size
-
-    def done_loss(self, logits, targets):
-        return F.binary_cross_entropy_with_logits(logits, targets, reduction='sum') / self.batch_size
-
     # reset hidden states for real prediction
     def state_reset(self, init_grids, idxs=None):
         if idxs is None:
-            self.hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
-            self.cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
+            self.mem_states = (
+                torch.zeros((1, self.batch_size, self.hidden_dim), device=self.device),
+                torch.zeros((1, self.batch_size, self.hidden_dim), device=self.device)
+            )
         else:
-            self.hidden_states[:, idxs] = 0
-            self.cell_states[:, idxs] = 0
+            self.mem_states[0][:, idxs] = 0
+            self.mem_states[1][:, idxs] = 0
 
-    # detach hidden states for real prediction
     def state_detach(self):
-        self.hidden_states = self.hidden_states.detach()
-        self.cell_states = self.cell_states.detach()
+        self.mem_states = (
+            self.mem_states[0].detach(),
+            self.mem_states[1].detach()
+        )
 
-    # update model via real loss
     def loss_update(self):
+
         self.optimizer.zero_grad()
         total_loss = 0
         for k in self.loss:
-            total_loss += self.loss[k] * self.loss_weight[k]
+            if self.debug_latent_loss_only and k != 'latent':
+                continue
+            if self.debug_no_latent_loss and k == 'latent':
+                continue
+            total_loss += self.loss[k]
+
         total_loss.backward()
         self.optimizer.step()
 
-        #print(total_loss.item() / self.backprop_count)
+        #print(self.loss['loc'].item() / self.backprop_count)
 
         loss_values = self.loss_reset()
         self.state_detach()
 
         return loss_values
 
-    # reset real loss
     def loss_reset(self):
+
         with torch.no_grad():
             avg_loss = {}
             avg_loss['total'] = 0
             for k in self.loss:
+                if self.debug_latent_loss_only and k != 'latent':
+                    continue
+                if self.debug_no_latent_loss and k == 'latent':
+                    continue
                 avg_loss[k] = self.loss[k].item() / self.backprop_count
-                avg_loss['total'] += avg_loss[k] * self.loss_weight[k]
-
-        for k in self.loss:
-            self.loss[k] = 0
+                avg_loss['total'] += avg_loss[k]
+                self.loss[k] = 0
 
         self.backprop_count = 0
 
         return avg_loss
-
-    def predict_grid(self, preds, sample=False):
-
-        grids = torch.zeros((preds['loc'].shape[0], H, W, GRID_CHANNELS)).to(self.device)
-        if sample:
-            loc_dists = torch.distributions.Categorical(probs=preds['loc'])
-            locs = loc_dists.sample()
-            id_dists = torch.distributions.Categorical(probs=preds['id'])
-            ids = id_dists.sample()
-        else:
-            _, locs = preds['loc'].max(-1)
-            _, ids = preds['id'].max(-1)
-
-        grids = F.one_hot(locs, num_classes=H * W + 1)
-        grids = grids[...,:-1]
-        grids = grids.view(grids.shape[0], grids.shape[1], H,  W)
-
-        ids = ids.view(ids.shape[0], ids.shape[1], 1, 1).repeat(1, 1, H, W)
-        grids = grids * ids
-        # b x c x h x w --> b x h x w x c
-        grids = grids.permute((0, 2, 3, 1))
-
-        return grids
 
 
 class WorldModel(WorldModelBase):
@@ -150,12 +107,23 @@ class WorldModel(WorldModelBase):
 
         super().__init__()
 
+        self.random = random.Random(args.seed + 243)
+        self.latent_tokenizer = args.latent_tokenizer
         self.batch_size = args.batch_size
         self.device = args.device
         self.manuals = args.manuals
         self.keep_entity_features_for_parsed_manuals = args.keep_entity_features_for_parsed_manuals
+        self.debug_latent_loss_only = args.debug_latent_loss_only
+        self.debug_zero_latent = args.debug_zero_latent
+        self.debug_no_latent_loss = args.debug_no_latent_loss
+        self.debug_no_reward_done_input = args.debug_no_reward_done_input
+        self.debug_no_latent = args.debug_no_latent
+        self.debug_no_predict_other_ids = args.debug_no_predict_other_ids
 
-        self.hidden_size = hidden_size = args.hidden_size
+        if self.debug_no_latent:
+            self.debug_no_latent_loss = 1
+
+        self.hidden_dim = hidden_dim = args.hidden_dim
         self.attr_embed_dim = attr_embed_dim = args.attr_embed_dim
         self.desc_key_dim = desc_key_dim = args.desc_key_dim
         action_embed_dim = args.action_embed_dim
@@ -196,59 +164,92 @@ class WorldModel(WorldModelBase):
         self.after_encoder_shape = test_out.shape
 
         enc_dim = math.prod(self.after_encoder_shape[1:])
-        self.before_lstm_projector = nn.Sequential(
+        self.before_mem_projector = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(enc_dim, hidden_size),
+            nn.Linear(enc_dim, hidden_dim),
             nn.ReLU()
         )
 
         self.action_embeddings = nn.Embedding(5, action_embed_dim)
-        self.reward_embeddings = nn.Embedding(5, action_embed_dim)
+        self.reward_embeddings = nn.Embedding(5, action_embed_dim // 4)
+        self.done_embeddings  = nn.Embedding(3, action_embed_dim // 4)
 
-        self.lstm = nn.LSTM(
-            hidden_size + action_embed_dim * 2,
-            hidden_size,
+        mem_in_dim = hidden_dim + action_embed_dim + action_embed_dim // 2
+        if self.debug_no_reward_done_input:
+            mem_in_dim = hidden_dim + action_embed_dim
+        self.memory = nn.LSTM(
+            mem_in_dim,
+            hidden_dim,
         )
 
-        self.after_lstm_projector = nn.Sequential(
-            nn.Linear(hidden_size, enc_dim),
+        if not args.debug_no_latent:
+            self.latent_input_projector = nn.Sequential(
+                nn.Linear(hidden_dim, args.latent_dim),
+                nn.ReLU()
+            )
+            self.latent_embeddings = nn.Embedding(
+                len(args.latent_tokenizer.get_vocab()),
+                args.latent_dim
+            )
+            self.latent_generator = LSTMDecoder(
+                args.latent_tokenizer,
+                args.latent_dim,
+                args.device
+            )
+            # IMPORTANT: tie latent_generator embeddings with latent_embeddings
+            self.latent_generator.embeddings.weight = self.latent_embeddings.weight
+
+        loc_in_dim = hidden_dim
+        if not args.debug_no_latent:
+            loc_in_dim += args.latent_dim * 8
+        self.loc_in_projector = nn.Sequential(
+            nn.Linear(loc_in_dim, enc_dim),
             nn.ReLU()
         )
-
         self.location_head = ResNetDecoder(attr_embed_dim, GRID_CHANNELS)
 
-        self.id_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, GRID_CHANNELS * NUM_ENTITIES)
-        )
-
+        nonexistence_in_dim = hidden_dim
+        if not args.debug_no_latent:
+            nonexistence_in_dim += args.latent_dim * 8
         nonexistence_layers = [
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(nonexistence_in_dim, hidden_dim),
             nn.ReLU()
         ]
         for _ in range(self.encoder.num_layers - 1):
             nonexistence_layers.extend([
-                nn.Linear(hidden_size, hidden_size),
+                nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU()
             ])
-        nonexistence_layers.append(nn.Linear(hidden_size, GRID_CHANNELS))
+        nonexistence_layers.append(nn.Linear(hidden_dim, GRID_CHANNELS))
         self.nonexistence_head = nn.Sequential(*nonexistence_layers)
 
-        self.reward_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
+        id_in_dim = hidden_dim
+        if not args.debug_no_latent:
+            id_in_dim += args.latent_dim * 4
+        self.id_head = nn.Sequential(
+            nn.Linear(id_in_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_size, 5),
-            #nn.Flatten(start_dim=0, end_dim=-1),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, GRID_CHANNELS * NUM_ENTITIES)
         )
 
-        self.done_head = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
+        reward_in_dim = hidden_dim
+        if not args.debug_no_latent:
+            reward_in_dim += args.latent_dim
+        self.reward_head = nn.Sequential(
+            nn.Linear(reward_in_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_size, 1),
-            nn.Flatten(start_dim=0),
+            nn.Linear(hidden_dim, 5),
+        )
+
+        done_in_dim = hidden_dim
+        if not args.debug_no_latent:
+            done_in_dim += args.latent_dim
+        self.done_head = nn.Sequential(
+            nn.Linear(done_in_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 2),
         )
 
         # training parameters
@@ -258,20 +259,13 @@ class WorldModel(WorldModelBase):
 
         # loss accumulation
         self.loss = {
-            'loc': 0,
-            'id': 0,
+            'latent': 0,
+            'loc' : 0,
+            'id' : 0,
             'reward': 0,
             'done': 0
         }
-        self.loss_weight = args.loss_weights
-        self.id_class_count = [1] * NUM_ENTITIES
         self.backprop_count = 0
-
-    def _select(self, embed, x):
-        # Work around slow backward pass of nn.Embedding, see
-        # https://github.com/pytorch/pytorch/issues/24912
-        out = embed.weight.index_select(0, x.reshape(-1))
-        return out.reshape(x.shape + (-1,))
 
     def embed_grids_with_parsed_manuals(self, grids, parsed_manuals):
         positions = [] # B x 4
@@ -393,7 +387,6 @@ class WorldModel(WorldModelBase):
 
         return roles_embed + movements_embed + positions_embed + ids_embed
 
-
     def embed_grids_without_manuals(self, grids):
 
         b, h, w, c = grids.shape
@@ -411,83 +404,101 @@ class WorldModel(WorldModelBase):
 
         return positions_embed + ids_embed
 
-
-    def forward(self, grids, rewards, embedded_manuals, parsed_manuals, actions, lstm_states):
+    def step(self,
+            manuals,
+            grids,
+            rewards,
+            dones,
+            actions,
+            new_state_descriptions,
+            mem_states,
+            is_eval=False
+        ):
 
         if self.manuals in ['gpt', 'oracle']:
-            grids_embed = self.embed_grids_with_parsed_manuals(grids, parsed_manuals)
+            grids_embed = self.embed_grids_with_parsed_manuals(grids, manuals)
         elif self.manuals == 'embed':
-            grids_embed = self.embed_grids_with_embedded_manuals(grids, embedded_manuals)
+            grids_embed = self.embed_grids_with_embedded_manuals(grids, manuals)
         elif self.manuals == 'none':
             grids_embed = self.embed_grids_without_manuals(grids)
         else:
             raise NotImplementedError
 
-        latents = self.encoder(grids_embed)
-        latents = self.before_lstm_projector(latents)
+        grids_embed   = self.before_mem_projector(self.encoder(grids_embed))
+        rewards_embed = self.reward_embeddings((rewards.long() + 1) * 2)
+        dones_embed   = self.done_embeddings(dones)
+        actions_embed = self.action_embeddings(actions)
 
-        rewards = self.reward_embeddings(rewards)
-        actions = self.action_embeddings(actions)
-
-        mem_ins = torch.cat((latents, actions, rewards), dim=-1).unsqueeze(0)
-        mem_outs, (hidden_states, cell_states) = self.lstm(mem_ins, lstm_states)
+        mem_ins = (grids_embed, rewards_embed, dones_embed, actions_embed)
+        if self.debug_no_reward_done_input:
+            mem_ins = (grids_embed, actions_embed)
+        mem_ins = torch.cat(mem_ins, dim=-1).unsqueeze(0)
+        mem_outs, new_mem_states = self.memory(mem_ins, mem_states)
         mem_outs = mem_outs.squeeze(0)
 
-        logits= {}
+        logits = {}
 
-        loc_inps = self.after_lstm_projector(mem_outs)
-        loc_inps = loc_inps.view(loc_inps.shape[0], *self.after_encoder_shape[1:])
-        logits['grid'] = self.location_head(loc_inps)
-        logits['nonexistence'] = self.nonexistence_head(mem_outs)
+        if not self.debug_no_latent:
+            latent_init_states = self.latent_input_projector(mem_outs)
+            logits['latent'] = self.latent_generator.decode(
+                latent_init_states, new_state_descriptions[:, :-1])
 
-        logits['id'] = self.id_head(mem_outs)
+            latents = new_state_descriptions[:, 1:]
+
+            assert latents.shape[1] == DESCRIPTION_LENGTH
+
+            latents = self.latent_embeddings(latents)
+
+            if self.debug_zero_latent:
+                latents = latents * 0
+
+        if self.debug_no_latent:
+            loc_ins = mem_outs
+        else:
+            loc_latents = latents[:, :8].flatten(1, 2)
+            loc_ins = torch.cat([mem_outs, loc_latents], dim=-1)
+        nonexistence_logits = self.nonexistence_head(loc_ins).unsqueeze(-1)
+        loc_ins = self.loc_in_projector(loc_ins)
+        loc_ins = loc_ins.view(loc_ins.shape[0], *self.after_encoder_shape[1:])
+        grid_logits = self.location_head(loc_ins)
+        grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
+        logits['loc'] = torch.cat((grid_logits, nonexistence_logits), dim=-1)
+
+        if self.debug_no_latent:
+            id_ins = mem_outs
+        else:
+            id_latents = latents[:, 8:12].flatten(1, 2)
+            id_ins = torch.cat([mem_outs, id_latents], dim=-1)
+        logits['id'] = self.id_head(id_ins)
         logits['id'] = logits['id'].view(logits['id'].shape[0], GRID_CHANNELS, NUM_ENTITIES)
 
-        logits['reward'] = self.reward_head(mem_outs)
-        logits['done'] = self.done_head(mem_outs)
+        if self.debug_no_latent:
+            reward_ins = mem_outs
+        else:
+            reward_latents = latents[:, 12]
+            reward_ins = torch.cat([mem_outs, reward_latents], dim=-1)
+        logits['reward'] = self.reward_head(reward_ins)
 
-        return logits, (hidden_states, cell_states)
+        if self.debug_no_latent:
+            done_ins = mem_outs
+        else:
+            done_latents = latents[:, 13]
+            done_ins = torch.cat([mem_outs, done_latents], dim=-1)
+        logits['done'] = self.done_head(done_ins)
 
-    def create_loc_logits(self, grid_logits, nonexistence_logits):
-        grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
-        nonexistence_logits = nonexistence_logits.unsqueeze(-1)
-        location_logits = torch.cat((grid_logits, nonexistence_logits), dim=-1)
-        return location_logits
+        """
+        for k in logits:
+            print(k, logits[k].shape)
+        """
 
-    def create_loc_logits_and_targets(self, grid_logits, nonexistence_logits, grids):
-
-        grid_logits = grid_logits.view(grid_logits.shape[0], grid_logits.shape[1], -1)
-        nonexistence_logits = nonexistence_logits.unsqueeze(-1)
-        location_logits = torch.cat((grid_logits, nonexistence_logits), dim=-1)
-
-        grid_targets = (grids.permute((0, 3, 1, 2)) > 0).float()
-        grid_targets = grid_targets.view(grid_targets.shape[0], grid_targets.shape[1], -1)
-        nonexistence_targets = (1. - grid_targets.sum(dim=-1)).unsqueeze(-1)
-        location_targets = torch.cat((grid_targets, nonexistence_targets), dim=-1)
-
-        return location_logits, location_targets
-
-    def create_id_logits_and_targets(self, id_logits, grids, true_parsed_manuals):
-        id_targets = torch.zeros((id_logits.shape[0], GRID_CHANNELS), device=self.device).long()
-        for i, triplet in enumerate(true_parsed_manuals):
-            for j, e in enumerate(triplet):
-                id_targets[i, j] = ENTITY_IDS[e[0]] if e is not None else 0
-            avatar_id = grids[i, :, :, 3].view(-1).max().item()
-            id_targets[i, 3] = avatar_id
-
-        if self.manuals in ['gpt', 'oracle']:
-            # only predict id of avatar
-            id_targets[:, :3] = -1
-
-        return id_logits, id_targets
+        return logits, new_mem_states
 
     def reorder_parsed_manuals(self, parsed_manuals, grids):
         b, h, w, c = grids.shape
         entity_per_channel, _ = grids[...,:-1].flatten(1, 2).max(1)
         new_parsed_manuals = []
-        #print(ENTITY_IDS)
+
         for i, triplet in enumerate(parsed_manuals):
-            #print(i, triplet, entity_per_channel[i])
             new_triplet = []
             for r in entity_per_channel[i].tolist():
                 if r == 0:
@@ -498,153 +509,201 @@ class WorldModel(WorldModelBase):
                     if e[0] in ENTITY_IDS and ENTITY_IDS[e[0]] == r:
                         new_triplet[-1] = e
                         break
-            #print(new_triplet)
             assert len(new_triplet) == 3
             new_parsed_manuals.append(new_triplet)
         return new_parsed_manuals
 
-    def reward_to_label(self, x):
-        for i in range(x.shape[0]):
-            x[i] = (x[i] + 1) * 2
-        return x.long()
+    def create_targets(self, grids, rewards, dones, state_descriptions, true_parsed_manuals):
 
-    def step(self,
-            old_grids,
-            old_rewards,
-            embedded_manuals,
-            parsed_manuals,
+        b, h, w, c = grids.shape
+
+        targets = {}
+
+        targets['latent'] = state_descriptions[:, 1:]
+        assert targets['latent'].shape[1] == DESCRIPTION_LENGTH
+
+        loc = (grids.permute((0, 3, 1, 2)) > 0).float()
+        loc = loc.view(loc.shape[0], loc.shape[1], -1)
+        nonexistence = (1. - loc.sum(dim=-1)).unsqueeze(-1)
+        targets['loc'] = torch.cat((loc, nonexistence), dim=-1)
+        assert targets['loc'].sum() == b * c
+        targets['loc'] = targets['loc'].max(dim=-1)[1]
+
+        targets['id'] = grids.view(b, -1, c).max(dim=1)[0]
+
+        """
+        targets['id'] = torch.zeros((b, c), device=self.device).long()
+        for i, triplet in enumerate(true_parsed_manuals):
+            for j, e in enumerate(triplet):
+                targets['id'][i, j] = ENTITY_IDS[e[0]] if e is not None else 0
+            avatar_id = grids[i, :, :, 3].view(-1).max().item()
+            targets['id'][i, 3] = avatar_id
+        """
+
+        if self.debug_no_predict_other_ids:
+            if self.manuals in ['gpt', 'oracle']:
+                # only predict id of avatar
+                targets['id'][:, :3] = -1
+
+        targets['reward'] = (rewards.long() + 1) * 2
+        targets['done'] = dones
+
+        return targets
+
+    def forward(self,
+            manuals,
             true_parsed_manuals,
-            actions,
             grids,
             rewards,
             dones,
-            backprop_idxs):
+            actions,
+            new_grids,
+            new_rewards,
+            new_dones,
+            new_state_descriptions,
+            select_idxs,
+            is_eval=False,
+        ):
 
-        old_rewards = self.reward_to_label(old_rewards)
-
-        if parsed_manuals is not None:
-            parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, grids)
+        if manuals is not None:
+            manuals = self.reorder_parsed_manuals(manuals, grids)
         true_parsed_manuals = self.reorder_parsed_manuals(true_parsed_manuals, grids)
 
-        logits, (self.hidden_states, self.cell_states) = self.forward(
-            old_grids,
-            old_rewards,
-            embedded_manuals,
-            parsed_manuals,
-            actions,
-            (self.hidden_states, self.cell_states),
-        )
+        """
+        if manuals:
+            print(manuals[0])
+        else:
+            print(manuals)
+        """
 
-        # select examples that need backprop
-        if parsed_manuals is not None:
-            parsed_manuals = [parsed_manuals[i] for i in backprop_idxs]
-        true_parsed_manuals = [true_parsed_manuals[i] for i in backprop_idxs]
-        for k in logits:
-            logits[k] = logits[k][backprop_idxs]
-
-        targets = {}
-        targets['grid'] = grids[backprop_idxs]
-        logits['loc'], targets['loc'] = self.create_loc_logits_and_targets(
-            logits['grid'],
-            logits['nonexistence'],
-            targets['grid']
-        )
-        logits['id'], targets['id'] = self.create_id_logits_and_targets(
-            logits['id'],
-            grids,
+        targets = self.create_targets(
+            new_grids,
+            new_rewards,
+            new_dones,
+            new_state_descriptions,
             true_parsed_manuals
         )
-        targets['reward'] = rewards[backprop_idxs]
-        targets['reward'] = self.reward_to_label(targets['reward'])
-        targets['done'] = dones[backprop_idxs].float()
-
-        for k in targets:
-            if k == 'grid':
-                continue
-            self.loss[k] += getattr(self, k + '_loss')(logits[k], targets[k])
-
-        self.backprop_count += 1
-
-        with torch.no_grad():
-            preds = {}
-            preds['loc'] = logits['loc'].softmax(dim=-1)
-            preds['reward'] = logits['reward'].detach()
-            preds['done'] = torch.sigmoid(logits['done'])
-            preds['id'] = logits['id'].softmax(dim=-1)
-            # oracle or gpt manuals: use parsed_manuals to overwrite id predictions
-            if parsed_manuals is not None:
-                for i, triplet in enumerate(parsed_manuals):
-                    for j, e in enumerate(triplet):
-                        preds['id'][i, j] = 0
-                        if e is None:
-                            k = 0
-                        elif e[0] not in ENTITY_IDS:
-                            k = 1
-                        else:
-                            k = ENTITY_IDS[e[0]]
-                        preds['id'][i, j, k] = 1.
-            preds['grid'] = self.predict_grid(preds)
-
-        return preds, targets
-
-    def pred(self,
-            old_grids,
-            parsed_manuals,
-            actions,
-            sample):
-
-        if self.manuals != "gpt":
-            raise NotImplementedError
-
-        parsed_manuals = self.reorder_parsed_manuals(parsed_manuals, old_grids)
-
-        logits, (self.hidden_states, self.cell_states) = self.forward(
-            old_grids,
-            None,
-            parsed_manuals,
-            actions,
-            (self.hidden_states, self.cell_states),
-        )
-
-        logits['loc'] = self.create_loc_logits(
-            logits['grid'],
-            logits['nonexistence']
-        )
 
         """
-        print(logits['loc'].shape)
-        b, c, _ = logits['loc'].shape
-        loc_probs = logits['loc'].softmax(-1)[...,:-1].view(b, c, H, W)
-        print(loc_probs[0][0])
-        print(loc_probs[0][1])
-        print(loc_probs[0][2])
+        print(new_grids.shape, targets['loc'].shape)
+        print(true_parsed_manuals[0])
+        #print(grids[0].sum(dim=-1))
+        print(new_grids[0].sum(dim=-1))
+        #print(new_grids[0, :, :, 0])
+        print(targets['loc'][0])
+        print(targets['id'][0])
+        print(targets['reward'][0])
+        print(targets['done'][0])
         """
 
-        with torch.no_grad():
-            preds = {}
-            preds['loc'] = logits['loc'].softmax(dim=-1)
-            preds['reward'] = logits['reward'].detach()
+        logits, self.mem_states = self.step(
+            manuals,
+            grids,
+            rewards,
+            dones,
+            actions,
+            new_state_descriptions,
+            self.mem_states,
+            is_eval=is_eval
+        )
 
-            done_dist = torch.distributions.Bernoulli(logits=logits['done'])
-            if sample:
-                preds['done'] = done_dist.sample().long()
-            else:
-                preds['done'] = (logits['done'].sigmoid() > 0.5).long()
-                #print('asdfa', preds['done'])
+        # select those that are valid continuations
+        if manuals is not None:
+            manuals = [manuals[i] for i in select_idxs]
+        true_parsed_manuals = [true_parsed_manuals[i] for i in select_idxs]
+        for k in logits:
+            logits[k] = logits[k][select_idxs]
+            targets[k] = targets[k][select_idxs]
 
-            preds['id'] = logits['id'].softmax(dim=-1)
-            # oracle or gpt manuals: use parsed_manuals to overwrite id predictions
-            if parsed_manuals is not None:
-                for i, triplet in enumerate(parsed_manuals):
-                    for j, e in enumerate(triplet):
-                        preds['id'][i, j] = 0
-                        if e is None:
-                            k = 0
-                        elif e[0] not in ENTITY_IDS:
-                            k = 1
-                        else:
-                            k = ENTITY_IDS[e[0]]
-                        preds['id'][i, j, k] = 1.
-                preds['grid'] = self.predict_grid(preds, sample=sample)
+        if not is_eval:
+            for k in logits:
+                if 'latent_' in k:
+                    continue
+                normalizer = math.prod(targets[k].shape)
+                logits_flat = logits[k].flatten(0, logits[k].dim() - 2)
+                targets_flat = targets[k].flatten()
+                self.loss[k] += F.cross_entropy(
+                    logits_flat, targets_flat, reduction='sum', ignore_index=-1) / normalizer
 
-        return preds
+            self.backprop_count += 1
+
+        if manuals is not None and self.debug_no_predict_other_ids:
+            for i, triplet in enumerate(manuals):
+                for j, e in enumerate(triplet):
+                    if e is None:
+                        id = 0
+                    elif e[0] not in ENTITY_IDS:
+                        id = 1
+                    else:
+                        id = ENTITY_IDS[e[0]]
+                    for k in range(logits['id'].shape[-1]):
+                        if k != id:
+                            logits['id'][i, j, k] = float('-inf')
+
+        logits['latent_loc'] = logits['latent'][:, :8]
+        logits['latent_id'] = logits['latent'][:, 8:12]
+        logits['latent_reward'] = logits['latent'][:, 12]
+        logits['latent_done'] = logits['latent'][:, 13]
+
+        targets['latent_loc'] = targets['latent'][:, :8]
+        targets['latent_id'] = targets['latent'][:, 8:12]
+        targets['latent_reward'] = targets['latent'][:, 12]
+        targets['latent_done'] = targets['latent'][:, 13]
+
+        return logits, targets
+
+    """
+    def evaluate(self,
+            manuals,
+            grids,
+            rewards,
+            dones,
+            actions,
+            new_state_descriptions,
+            select_idxs
+        ):
+
+        if self.manuals == 'gpt':
+            manuals = self.reorder_parsed_manuals(manuals, grids)
+
+        logits, self.mem_states = self.step(
+            manuals,
+            grids,
+            rewards,
+            dones,
+            actions,
+            new_state_descriptions,
+            self.mem_states,
+            is_eval=True
+        )
+
+        pred_dict = {
+            'grid': [],
+            'reward': [],
+            'done': []
+        }
+        for i in range(preds.shape[0]):
+            description = self.tokenizer.decode(preds[i].tolist()).split()
+            new_grid, new_reward, new_done = self._description_to_state(description)
+            pred_dict['grid'].append(new_grid)
+            pred_dict['reward'].append(new_reward)
+            pred_dict['done'].append(new_done)
+
+        pred_dict['grid'] = torch.stack(pred_dict['grid'])
+        pred_dict['reward'] = torch.tensor(pred_dict['reward']).to(self.device).float()
+        pred_dict['done'] = torch.tensor(pred_dict['done']).to(self.device).long()
+
+        return logit_dict, target_dict, pred_dict
+
+    def _description_to_state(self, d):
+        grid = torch.zeros((H, W, GRID_CHANNELS)).to(self.device)
+        for c in range(4):
+            h = d[c * 2].replace('row_', '')
+            w = d[c * 2 + 1].replace('col_', '')
+            id = int(d[8 + c].replace('id_', ''))
+            if h != 'none' and w != 'none':
+                grid[int(h), int(w), c] = id
+        reward = (float(d[12].replace('reward_', '')) / 2) - 1
+        done = int(d[13] == 'done')
+        return grid, reward, done
+    """

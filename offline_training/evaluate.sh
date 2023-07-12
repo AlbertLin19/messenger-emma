@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=messenger_oracle
+#SBATCH --job-name=messenger_fun
 #SBATCH --output=slurm_output/%x-%j.out
 #SBATCH -N 1 #nodes
 #SBATCH -n 1 #tasks
@@ -8,17 +8,11 @@
 #SBATCH --time=0-23:59:59    # Run for 23:59:59 hours
 #SBATCH --gres=gpu:1
 
-for model in none oracle gpt embed
-do
-  model_path=experiments/${model}_paper_10k_train_500_eval/dev_ne_nr_or_nm_best_total_loss.ckpt
-  echo $model_path
-  python3 -u train_khanh.py \
-        --dataset_path custom_dataset/dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle \
-        --exp_name ${model}_paper_10k_train_500_eval \
-        --manuals $model \
-        --device 0 \
-        --load_model_from $model_path \
-        --eval_mode 1
-done
-
-
+python3 -u train_transformer.py \
+                   --dataset_path custom_dataset/dataset_transformer_10k_train_500_eval.pickle \
+                   --description_tokenizer custom_dataset/tokenizer_transformer.json \
+                   --transformer_config_file gpt2-small-config.json \
+                   --exp_name tmp2 \
+                   --manuals oracle \
+                   --eval_mode 1 \
+                   --load_model experiments/fun_transformer_v2_oracle/dev_ne_nr_or_nm_best_state_loss.ckpt

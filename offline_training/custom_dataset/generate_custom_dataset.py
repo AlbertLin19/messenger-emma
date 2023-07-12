@@ -62,6 +62,8 @@ from tqdm import tqdm
 
 from messenger.envs.config import NPCS, NO_MESSAGE, WITH_MESSAGE
 
+from tokenizers import Tokenizer
+
 ENTITY_IDS = {entity.name: entity.id for entity in NPCS}
 CUSTOM_TO_MESSENGER_ENTITY = {
     "robot": "robot",
@@ -197,16 +199,70 @@ def wrap_obs(obs, entity_order):
     obs['entities'] = obs['entities'][..., entity_order]
     return np.concatenate((obs["entities"], obs["avatar"]), axis=-1)
 
+def describe_state(ob, reward, done):
+    ob = torch.tensor(ob)
+    description = ['_start_']
+    for i in range(ob.shape[-1]):
+        pos = ob[..., i].nonzero().tolist()
+        if pos:
+            pos = pos[0]
+            description.append('%d_row_%d' % (i, pos[0]))
+            description.append('%d_col_%d' % (i, pos[1]))
+        else:
+            description.append('%d_row_none' % i)
+            description.append('%d_col_none' % i)
+
+    for i in range(ob.shape[-1]):
+        id = int(ob[...,i].max().item())
+        description.append('%d_id_%d' % (i, id))
+    description.append('reward_%d' % int((reward + 1) * 2))
+    description.append('done' if done else 'not_done')
+    """
+    print(ob.sum(dim=-1))
+    print(ob.view(-1, 4).sum(dim=0))
+    """
+    encoded = tokenizer.encode(description, is_pretokenized=True)
+    return encoded.ids
+
+def describe_state_transformer(ob, reward, done):
+    ob = torch.tensor(ob)
+    description = ['_start_']
+    for i in range(ob.shape[-1]):
+        description.append('entity_%d' % i)
+        id = int(ob[...,i].max().item())
+        description.append('id_%d' % id)
+        pos = ob[..., i].nonzero().tolist()
+        if pos:
+            pos = pos[0]
+            description.append('row_%d' % pos[0])
+            description.append('col_%d' % pos[1])
+        else:
+            description.append('row_none')
+            description.append('col_none')
+
+    #description.append('reward_%d' % int((reward + 1) * 2))
+    #description.append('done' if done else 'not_done')
+    """
+    print(ob.sum(dim=-1))
+    print(ob.view(-1, 4).sum(dim=0))
+    """
+    encoded = tokenizer.encode(description, is_pretokenized=True)
+    """
+    print(description)
+    print(encoded.ids)
+    """
+    return encoded.ids
+
+
 random.seed(23)
 np.random.seed(23)
 
-SAVE_PATH = "./dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle"
+SAVE_PATH = "./dataset_transformer_10k_train_500_eval.pickle"
 SPLITS_PATH = "./data_splits_final_with_test.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
 NUM_TRAIN = 10000
 NUM_EVAL = 500
-
 
 MAX_ROLLOUT_LENGTH = 32
 
@@ -215,6 +271,9 @@ with open(SPLITS_PATH, "r") as f:
 
 with open(TEXTS_PATH, "r") as f:
     texts = json.load(f)
+
+tokenizer = Tokenizer.from_file('tokenizer_transformer.json')
+
 keys = {
     'entities': list(texts.keys()),
     'dynamics': list(list(texts.values())[0].keys()),
@@ -241,10 +300,11 @@ for split, games in splits.items():
     print(split)
     manual_idxs = []
     ground_truth_idxs = []
-    grid_sequences = []
-    action_sequences = []
-    reward_sequences = []
-    done_sequences = []
+    grid_seqs = []
+    action_seqs = []
+    reward_seqs = []
+    done_seqs = []
+    state_description_seqs = []
 
     count_rewards = defaultdict(int)
 
@@ -273,10 +333,12 @@ for split, games in splits.items():
             manual_idxs.append(manual_idx)
             ground_truth_idxs.append(ground_truth_idx)
 
-            grid_sequence = [obs]
-            action_sequence = [0]
-            reward_sequence = [0]
-            done_sequence = [False]
+            grid_seq = [obs]
+            action_seq = [0]
+            reward_seq = [0]
+            done_seq = [False]
+
+            state_description_seq = [describe_state_transformer(grid_seq[-1], reward_seq[-1], done_seq[-1])]
 
             # choose an intention for the episode
             episode_intention = random.choice(INTENTIONS)
@@ -289,29 +351,33 @@ for split, games in splits.items():
                 action = choose_action(obs, ground_truth, episode_intention)
                 obs, reward, done, _ = env.step(action)
                 obs = wrap_obs(obs, entity_order)
-                grid_sequence.append(obs)
-                action_sequence.append(action)
-                reward_sequence.append(reward)
-                done_sequence.append(done)
+                grid_seq.append(obs)
+                action_seq.append(action)
+                reward_seq.append(reward)
+                done_seq.append(done)
+                state_description_seq.append(describe_state_transformer(grid_seq[-1], reward_seq[-1], done_seq[-1]))
 
                 if reward != 0:
                     count_rewards[reward] += 1
 
-            grid_sequences.append(grid_sequence)
-            action_sequences.append(action_sequence)
-            reward_sequences.append(reward_sequence)
-            done_sequences.append(done_sequence)
+            grid_seqs.append(grid_seq)
+            action_seqs.append(action_seq)
+            reward_seqs.append(reward_seq)
+            done_seqs.append(done_seq)
+            state_description_seqs.append(state_description_seq)
+
     print(split, count_rewards)
     dataset["rollouts"][split] = {
         "manual_idxs": manual_idxs,
         "ground_truth_idxs": ground_truth_idxs,
-        "grid_sequences": grid_sequences,
-        "action_sequences": action_sequences,
-        "reward_sequences": reward_sequences,
-        "done_sequences": done_sequences,
+        "grid_sequences": grid_seqs,
+        "action_sequences": action_seqs,
+        "reward_sequences": reward_seqs,
+        "done_sequences": done_seqs,
+        "state_description_sequences": state_description_seqs
     }
 
 #print('DEBUG!!! uncomment saving')
 with open(SAVE_PATH, 'wb') as f:
     pickle.dump(dataset, f)
-    print('SAVED')
+    print('SAVED to %s' % SAVE_PATH)

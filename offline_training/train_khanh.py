@@ -16,7 +16,7 @@ import torch
 import torch.nn.functional as F
 import wandb
 import numpy as np
-
+from tokenizers import Tokenizer
 
 sys.path.append('..')
 
@@ -24,7 +24,7 @@ from tqdm import tqdm
 from transformers import AutoModel, AutoTokenizer
 from offline_training.batched_world_model.model_khanh import ENTITY_IDS
 from messenger.models.utils import BatchedEncoder
-from offline_training.batched_world_model.model_khanh import WorldModel
+from offline_training.batched_world_model.model_v2 import WorldModel
 from dataloader import DataLoader
 from evaluator import Evaluator
 
@@ -32,12 +32,16 @@ from chatgpt_groundings.utils import ENTITY_GROUNDING_LOOKUP, MOVEMENT_GROUNDING
 
 def train(args):
 
+    """
     args.loss_weights = {
         'loc': 1,
         'id': 1,
         'reward': args.reward_loss_weight,
         'done': args.done_loss_weight
     }
+    """
+
+    args.description_tokenizer = Tokenizer.from_file(args.description_tokenizer_file)
 
     world_model = WorldModel(args).to(args.device)
     print(world_model)
@@ -90,6 +94,7 @@ def train(args):
         mode="random",
         start_state=args.train_start_state,
         batch_size=args.batch_size,
+        #max_rollouts=100
     )
 
     eval_dataloaders = {}
@@ -117,6 +122,7 @@ def train(args):
 
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
     tensor_rewards = torch.zeros(tensor_grids.shape[0]).float().to(args.device)
+    tensor_dones = torch.zeros(tensor_grids.shape[0]).long().to(args.device)
 
     # reset world_model hidden states
     world_model.state_reset(tensor_grids)
@@ -126,6 +132,7 @@ def train(args):
 
     while step < args.max_step:
 
+        """
         # EVALUATION
         if step % args.eval_step == 0:
             wandb_stats = {}
@@ -170,15 +177,17 @@ def train(args):
 
         if args.eval_mode:
             break
+        """
 
         # TRAIN
         world_model.train()
 
         old_tensor_grids = tensor_grids
         old_tensor_rewards = tensor_rewards
+        old_tensor_dones = tensor_dones
 
         # load next-step data
-        manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
+        manuals, true_parsed_manuals, actions, grids, rewards, dones, state_descriptions, (new_idxs, cur_idxs), timesteps = train_dataloader.step()
         embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
 
         tensor_actions = torch.from_numpy(actions).long().to(args.device)
@@ -186,21 +195,25 @@ def train(args):
         tensor_rewards = torch.from_numpy(rewards).float().to(args.device)
         tensor_dones = torch.from_numpy(dones).long().to(args.device)
         tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
+        tensor_state_descriptions = torch.from_numpy(state_descriptions).long().to(args.device)
 
         parsed_manuals = get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings)
+        input_manuals = embedded_manuals if args.manuals == 'embed' else parsed_manuals
 
         if cur_idxs.tolist():
-            world_model.step(
+            world_model(
+                input_manuals,
+                true_parsed_manuals,
                 old_tensor_grids,
                 old_tensor_rewards,
-                embedded_manuals,
-                parsed_manuals,
-                true_parsed_manuals,
+                old_tensor_dones,
                 tensor_actions,
                 tensor_grids,
                 tensor_rewards,
                 tensor_dones,
-                cur_idxs
+                tensor_state_descriptions,
+                cur_idxs,
+                is_eval=False
             )
 
         step += 1
@@ -226,6 +239,7 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
     embedded_manuals = encode_manuals(args, manuals, manuals_encoder)
     tensor_grids = torch.from_numpy(grids).long().to(args.device)
     tensor_rewards = torch.zeros(tensor_grids.shape[0]).float().to(args.device)
+    tensor_dones = torch.zeros(tensor_grids.shape[0]).long().to(args.device)
 
     world_model.state_reset(tensor_grids)
 
@@ -234,8 +248,9 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
 
         old_tensor_grids = tensor_grids
         old_tensor_rewards = tensor_rewards
+        old_tensor_dones = tensor_dones
 
-        (manuals, true_parsed_manuals, actions, grids, rewards, dones, (new_idxs, cur_idxs),
+        (manuals, true_parsed_manuals, actions, grids, rewards, dones, state_descriptions, (new_idxs, cur_idxs),
         timesteps, just_completes, all_complete) = dataloader.step()
 
         if all_complete:
@@ -248,54 +263,64 @@ def evaluate(args, split, step, world_model, gpt_groundings, manuals_encoder, da
         tensor_rewards = torch.from_numpy(rewards).float().to(args.device)
         tensor_dones = torch.from_numpy(dones).long().to(args.device)
         tensor_timesteps = torch.from_numpy(timesteps).long().to(args.device)
+        tensor_state_descriptions = torch.from_numpy(state_descriptions).long().to(args.device)
 
         if cur_idxs.tolist():
 
             parsed_manuals = get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings)
+            input_manuals = embedded_manuals if args.manuals == 'embed' else parsed_manuals
 
-            preds, targets = world_model.step(
+            logits, targets = world_model(
+                input_manuals,
+                true_parsed_manuals,
                 old_tensor_grids,
                 old_tensor_rewards,
-                embedded_manuals,
-                parsed_manuals,
-                true_parsed_manuals,
+                old_tensor_dones,
                 tensor_actions,
                 tensor_grids,
                 tensor_rewards,
                 tensor_dones,
-                cur_idxs
+                tensor_state_descriptions,
+                cur_idxs,
+                is_eval=True
             )
 
-            add_eval_metrics(metrics, preds, targets, timesteps[cur_idxs])
+            add_eval_metrics(metrics, logits, targets, timesteps[cur_idxs])
 
         world_model.state_reset(tensor_grids, new_idxs)
 
+
+    logged_losses = ['total_loss', 'latent_loss', 'loc_loss', 'id_loss', 'reward_loss', 'done_loss']
+
     avg_metric = {}
+    avg_metric['total_loss'] = 0
     for k in metrics:
         avg_metric[k] = np.average(metrics[k])
         avg_metric[k.replace('loss', 'perp')] = math.exp(avg_metric[k])
-    avg_metric['total_loss'] = avg_metric['loc_loss'] + avg_metric['id_loss'] + avg_metric['reward_loss'] + avg_metric['done_loss']
+        if k in logged_losses:
+            avg_metric['total_loss'] += avg_metric[k]
 
     # update best model
     for k in avg_metric:
         if avg_metric[k] < best_metric[k]:
             best_metric[k] = avg_metric[k]
-            if k in ['loc_loss', 'id_loss', 'total_loss']:
+            if k in logged_losses:
                 model_path = os.path.join(args.output, '%s_best_%s.ckpt' % (split, k))
                 if not args.eval_mode:
                     torch.save(world_model.state_dict(), model_path)
                     print('Saved best %s %s to %s' % (split, k, model_path))
 
     print('  EVALUATION on %s' % split)
-    logged_losses = ['total_loss', 'loc_loss', 'id_loss', 'reward_loss', 'done_loss']
     log_str = []
     for k in logged_losses:
-        log_str.append('%s %.4f' % (k, avg_metric[k]))
+        if k in avg_metric:
+            log_str.append('%s %.4f' % (k, avg_metric[k]))
     log_str = '    CURRENT ' + ', '.join(log_str)
     print(log_str)
     log_str = []
     for k in logged_losses:
-        log_str.append('%s %.4f' % (k, best_metric[k]))
+        if k in best_metric:
+            log_str.append('%s %.4f' % (k, best_metric[k]))
     log_str = '    BEST    ' + ', '.join(log_str)
     print(log_str)
 
@@ -345,12 +370,29 @@ def get_parsed_manuals(args, manuals, true_parsed_manuals, gpt_groundings):
         parsed_manuals = None
     return parsed_manuals
 
-def add_eval_metrics(metrics, preds, targets, timesteps):
+def add_eval_metrics(metrics, logits, targets, timesteps):
+
+    if 'latent' in logits:
+        metrics['latent_loss'].extend(
+            F.cross_entropy(
+                logits['latent'].flatten(0, 1),
+                targets['latent'].flatten(),
+                reduction='none'
+            ).view(-1).tolist()
+        )
 
     metrics['loc_loss'].extend(
         F.cross_entropy(
-            (preds['loc'].flatten(0, 1) + 1e-6).log(),
-            targets['loc'].flatten(0, 1),
+            logits['loc'].flatten(0, 1),
+            targets['loc'].flatten(),
+            reduction='none'
+        ).view(-1).tolist()
+    )
+
+    metrics['latent_loc_loss'].extend(
+        F.cross_entropy(
+            logits['latent_loc'].flatten(0, 1),
+            targets['latent_loc'].flatten(),
             reduction='none'
         ).view(-1).tolist()
     )
@@ -359,26 +401,51 @@ def add_eval_metrics(metrics, preds, targets, timesteps):
         if t <= 10:
             metrics['loc_loss_len_%d' % t].extend(
                 F.cross_entropy(
-                    (preds['loc'][i] + 1e-6).log(),
+                    logits['loc'][i],
                     targets['loc'][i],
                     reduction='none'
                 ).view(-1).tolist()
             )
+            metrics['latent_loc_loss_len_%d' % t].extend(
+                F.cross_entropy(
+                    logits['latent_loc'][i],
+                    targets['latent_loc'][i],
+                    reduction='none'
+                ).view(-1).tolist()
+            )
+
             for tt in range(1, t + 1):
                 metrics['loc_loss_len_upto_%d' % t].extend(
                     F.cross_entropy(
-                        (preds['loc'][i] + 1e-6).log(),
+                        logits['loc'][i],
                         targets['loc'][i],
                         reduction='none'
                     ).view(-1).tolist()
                 )
+                metrics['latent_loc_loss_len_upto_%d' % t].extend(
+                    F.cross_entropy(
+                        logits['latent_loc'][i],
+                        targets['latent_loc'][i],
+                        reduction='none'
+                    ).view(-1).tolist()
+                )
+
 
     metrics['id_loss'].extend(
         F.cross_entropy(
-            (preds['id'].flatten(0, 1) + 1e-6).log(),
+            logits['id'].flatten(0, 1),
             targets['id'].flatten(),
-            ignore_index=-1,
-            reduction='none'
+            reduction='none',
+            ignore_index=-1
+        ).view(-1).tolist()
+    )
+
+    metrics['latent_id_loss'].extend(
+        F.cross_entropy(
+            logits['latent_id'].flatten(0, 1),
+            targets['latent_id'].flatten(),
+            reduction='none',
+            ignore_index=-1
         ).view(-1).tolist()
     )
 
@@ -386,37 +453,72 @@ def add_eval_metrics(metrics, preds, targets, timesteps):
         if t <= 10:
             metrics['id_loss_len_%d' % t].extend(
                 F.cross_entropy(
-                    (preds['id'][i] + 1e-6).log(),
+                    logits['id'][i],
                     targets['id'][i],
-                    ignore_index=-1,
-                    reduction='none'
+                    reduction='none',
+                    ignore_index=-1
                 ).view(-1).tolist()
             )
+            metrics['latent_id_loss_len_%d' % t].extend(
+                F.cross_entropy(
+                    logits['latent_id'][i],
+                    targets['latent_id'][i],
+                    reduction='none',
+                    ignore_index=-1
+                ).view(-1).tolist()
+            )
+
             for tt in range(1, t + 1):
                 metrics['id_loss_len_upto_%d' % t].extend(
                     F.cross_entropy(
-                        (preds['id'][i] + 1e-6).log(),
+                        logits['id'][i],
                         targets['id'][i],
-                        ignore_index=-1,
-                        reduction='none'
+                        reduction='none',
+                        ignore_index=-1
+                    ).view(-1).tolist()
+                )
+                metrics['latent_id_loss_len_upto_%d' % t].extend(
+                    F.cross_entropy(
+                        logits['latent_id'][i],
+                        targets['latent_id'][i],
+                        reduction='none',
+                        ignore_index=-1
                     ).view(-1).tolist()
                 )
 
+
     metrics['reward_loss'].extend(
         F.cross_entropy(
-            preds['reward'],
+            logits['reward'],
             targets['reward'],
             reduction='none'
         ).view(-1).tolist()
     )
 
+    metrics['latent_reward_loss'].extend(
+        F.cross_entropy(
+            logits['latent_reward'],
+            targets['latent_reward'],
+            reduction='none'
+        ).view(-1).tolist()
+    )
+
     metrics['done_loss'].extend(
-        F.binary_cross_entropy(
-            preds['done'],
+        F.cross_entropy(
+            logits['done'],
             targets['done'],
             reduction='none'
         ).view(-1).tolist()
     )
+
+    metrics['latent_done_loss'].extend(
+        F.cross_entropy(
+            logits['latent_done'],
+            targets['latent_done'],
+            reduction='none'
+        ).view(-1).tolist()
+    )
+
 
 
 if __name__ == "__main__":
@@ -428,6 +530,15 @@ if __name__ == "__main__":
     parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
     parser.add_argument("--exp_name", type=str, help="experiment name")
     parser.add_argument("--eval_mode", type=int, default=0, help="evaluation mode")
+    parser.add_argument("--description_tokenizer_file", type=str, help="Tokenizer file")
+    parser.add_argument("--gpt2_config_file", type=str, help="GPT2 configuration file")
+
+    parser.add_argument("--debug_latent_loss_only", type=int, default=0)
+    parser.add_argument("--debug_no_latent_loss", type=int, default=0)
+    parser.add_argument("--debug_zero_latent", type=int, default=0)
+    parser.add_argument("--debug_no_reward_done_input", type=int, default=1)
+    parser.add_argument("--debug_no_latent", type=int, default=0)
+    parser.add_argument("--debug_no_predict_other_ids", type=int, default=0)
 
     # text config
     parser.add_argument("--manuals", type=str,
@@ -436,11 +547,13 @@ if __name__ == "__main__":
 
     # World model arguments
     parser.add_argument("--load_model_from", default=None, help="Path to world model state dict.")
-    parser.add_argument("--hidden_size", default=512, type=int, help="World model hidden size.")
+    parser.add_argument("--hidden_dim", default=512, type=int, help="World model hidden size.")
     parser.add_argument('--attr_embed_dim', type=int, default=256, help='attribute embedding size')
     parser.add_argument('--action_embed_dim', type=int, default=256, help='action embedding size')
     parser.add_argument('--desc_key_dim', type=int, default=256, help="description key size")
     parser.add_argument('--keep_entity_features_for_parsed_manuals', type=int, default=1)
+
+    parser.add_argument('--latent_dim', type=int, default=64)
 
     parser.add_argument("--learning_rate", default=0.0001, type=float, help="World model learning rate.")
     parser.add_argument("--weight_decay", default=0, type=float, help="World model weight decay.")

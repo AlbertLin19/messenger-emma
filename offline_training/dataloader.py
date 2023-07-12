@@ -58,9 +58,6 @@ class DataLoader:
         )
         self.rollout_probs = (self.rollout_lengths-1)/np.sum(self.rollout_lengths-1)
 
-        #print(dataset['rollouts']['train_games']['grid_sequences'][41][0][:,:,3])
-        #print(dataset['rollouts']['train_games']['grid_sequences'][41][1][:,:,3])
-
         # cache data
         self.manuals_array = np.zeros((self.n_rollouts), dtype=object)
         self.ground_truths_array = np.zeros((self.n_rollouts), dtype=object)
@@ -68,13 +65,22 @@ class DataLoader:
         self.reward_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=float)
         self.done_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=bool)
         self.grid_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths), 10, 10, 4), dtype=int)
+        self.done_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths)), dtype=bool)
+        self.state_description_sequences_array = np.zeros((self.n_rollouts, np.max(self.rollout_lengths), 15), dtype=int)
+
         for i in tqdm(range(self.n_rollouts)):
             self.manuals_array[i] = get_manual(dataset, split, i)
             self.ground_truths_array[i] = get_ground_truth(dataset, split, i)
-            self.action_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["action_sequences"][i][:max_rollout_length]
-            self.reward_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["reward_sequences"][i][:max_rollout_length]
-            self.done_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["done_sequences"][i][:max_rollout_length]
-            self.grid_sequences_array[i, :self.rollout_lengths[i]] = dataset["rollouts"][split]["grid_sequences"][i][:max_rollout_length]
+            self.action_sequences_array[i, :self.rollout_lengths[i]] = \
+                dataset["rollouts"][split]["action_sequences"][i][:max_rollout_length]
+            self.reward_sequences_array[i, :self.rollout_lengths[i]] = \
+                dataset["rollouts"][split]["reward_sequences"][i][:max_rollout_length]
+            self.done_sequences_array[i, :self.rollout_lengths[i]] = \
+                dataset["rollouts"][split]["done_sequences"][i][:max_rollout_length]
+            self.grid_sequences_array[i, :self.rollout_lengths[i]] = \
+                dataset["rollouts"][split]["grid_sequences"][i][:max_rollout_length]
+            self.state_description_sequences_array[i, :self.rollout_lengths[i]] = \
+                dataset["rollouts"][split]["state_description_sequences"][i][:max_rollout_length]
 
         print(split, "n_rollouts:", self.n_rollouts, "; max_rollout_length:", np.max(self.rollout_lengths))
 
@@ -106,7 +112,7 @@ class DataLoader:
             return (
                 self.manuals_array[self.indices],
                 self.ground_truths_array[self.indices],
-                self.grid_sequences_array[self.indices, self.timesteps]
+                self.grid_sequences_array[self.indices, self.timesteps],
             )
         elif self.mode == "static":
             # keep track of available rollout indices
@@ -164,6 +170,7 @@ class DataLoader:
                 self.grid_sequences_array[self.indices, self.timesteps],
                 self.reward_sequences_array[self.indices, self.timesteps],
                 self.done_sequences_array[self.indices, self.timesteps],
+                self.state_description_sequences_array[self.indices, self.timesteps],
                 (new_idxs, cur_idxs),
                 self.timesteps,
             )
@@ -195,6 +202,7 @@ class DataLoader:
                 self.grid_sequences_array[nonnegative_indices, self.timesteps],
                 self.reward_sequences_array[nonnegative_indices, self.timesteps],
                 self.done_sequences_array[nonnegative_indices, self.timesteps],
+                self.state_description_sequences_array[nonnegative_indices, self.timesteps],
                 (new_idxs, cur_idxs),
                 self.timesteps,
                 (self.indices >= 0)*(self.timesteps == (self.rollout_lengths[nonnegative_indices]-1)), # whether rollout was just completed
