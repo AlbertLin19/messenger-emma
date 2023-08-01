@@ -257,11 +257,11 @@ def describe_state_transformer(ob, reward, done):
 random.seed(23)
 np.random.seed(23)
 
-SAVE_PATH = "./dataset_transformer_10k_train_500_eval.pickle"
+SAVE_PATH = "./dataset_transformer_50k_train_500_eval.pickle"
 SPLITS_PATH = "./data_splits_final_with_test.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
-NUM_TRAIN = 10000
+NUM_TRAIN = 50000
 NUM_EVAL = 500
 
 MAX_ROLLOUT_LENGTH = 32

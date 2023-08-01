@@ -129,7 +129,7 @@ class BasicBlock(nn.Module):
 
         return out
 
-conv_params = {
+default_conv_params = {
     'kernel': [3, 3, 3],
     'stride': [1, 2, 2],
     'padding': [2, 1, 1],
@@ -140,9 +140,12 @@ conv_params = {
 
 class ResNetEncoder(nn.Module):
 
-    def __init__(self, in_dim):
+    def __init__(self, in_dim, conv_params=None):
 
         super().__init__()
+
+        if conv_params is None:
+            conv_params = default_conv_params
 
         F = conv_params['kernel'][:]
         S = conv_params['stride'][:]
@@ -152,7 +155,6 @@ class ResNetEncoder(nn.Module):
         hidden_channels = conv_params['hidden_channels'][:]
 
         in_channels[0] = in_dim
-
 
         encoder_layers = [
             nn.Sequential(
@@ -184,9 +186,12 @@ class ResNetEncoder(nn.Module):
 
 class ResNetDecoder(nn.Module):
 
-    def __init__(self, in_dim, out_dim=None):
+    def __init__(self, in_dim, out_dim=None, conv_params=None):
 
         super().__init__()
+
+        if conv_params is None:
+            conv_params = default_conv_params
 
         F = conv_params['kernel'][:]
         S = conv_params['stride'][:]

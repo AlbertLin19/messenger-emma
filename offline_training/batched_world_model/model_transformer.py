@@ -96,14 +96,17 @@ class WorldModelBase(nn.Module):
             normalizer = math.prod(self.target_seq[0][k].shape)
             loss[k] = loss[k].item() / normalizer
 
-        self.optimizer.zero_grad()
+        total_loss = total_loss / self.gradient_accum_iters
         total_loss.backward()
-        self.optimizer.step()
 
         #print(total_loss.item() / len(self.logit_seq))
         #print(loss['state'] / 16)
 
         return loss
+
+    def update_params(self):
+        self.optimizer.step()
+        self.optimizer.zero_grad()
 
 
 class WorldModel(WorldModelBase):
@@ -117,6 +120,7 @@ class WorldModel(WorldModelBase):
         self.batch_size = args.batch_size
         self.device = args.device
         self.manuals = args.manuals
+        self.gradient_accum_iters = args.gradient_accum_iters
 
         self.keep_entity_features_for_parsed_manuals = args.keep_entity_features_for_parsed_manuals
         self.debug_latent_loss_only = args.debug_latent_loss_only
@@ -171,34 +175,43 @@ class WorldModel(WorldModelBase):
         self.after_encoder_shape = test_out.shape
 
         enc_dim = math.prod(self.after_encoder_shape[1:])
-        self.before_mem_projector = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(enc_dim, hidden_dim),
-            nn.ReLU()
-        )
 
         transformer_config = GPT2Config.from_json_file(args.transformer_config_file)
         transformer_config.vocab_size = len(self.tokenizer.get_vocab())
-        #transformer_config.n_layer = 2
+
+        if args.transformer_n_layer != -1:
+            transformer_config.n_layer = args.transformer_n_layer
+        if args.transformer_n_embd != -1:
+            transformer_config.n_embd = args.transformer_n_embd
+        if args.transformer_n_head != -1:
+            transformer_config.n_head = args.transformer_n_head
+
         self.transformer = GPT2LMHeadModel(transformer_config)
+        #self.transformer = nn.parallel.DistributedDataParallel(self.transformer)
         #self.description_mask = self.make_description_mask(self.tokenizer).to(self.device)
 
-        vocab_size = self.transformer.config.vocab_size
-        hidden_dim = self.transformer.config.n_embd
+        vocab_size = transformer_config.vocab_size
+        transformer_dim = transformer_config.n_embd
 
-        self.action_embeddings = nn.Embedding(5, hidden_dim)
-        self.token_embeddings = nn.Embedding(vocab_size, hidden_dim)
+        self.action_embeddings = nn.Embedding(5, transformer_dim)
+        self.token_embeddings = nn.Embedding(vocab_size, transformer_dim)
+
+        self.before_mem_projector = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(enc_dim, transformer_dim * 4),
+            nn.ReLU()
+        )
 
         self.reward_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(transformer_dim, transformer_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 5),
+            nn.Linear(transformer_dim, 5),
         )
 
         self.done_head = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim),
+            nn.Linear(transformer_dim, transformer_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, 2),
+            nn.Linear(transformer_dim, 2),
         )
 
         self.type_to_id = {
@@ -206,9 +219,9 @@ class WorldModel(WorldModelBase):
             'next_state': 1,
             'action': 2
         }
-        self.type_embeddings = nn.Embedding(3, hidden_dim)
-        self.global_step_embeddings = nn.Embedding(40, hidden_dim)
-        self.local_step_embeddings = nn.Embedding(20, hidden_dim)
+        self.type_embeddings = nn.Embedding(3, transformer_dim)
+        self.global_step_embeddings = nn.Embedding(40, transformer_dim)
+        self.local_step_embeddings = nn.Embedding(20, transformer_dim)
 
         # loss accumulation
         self.loss = {
@@ -217,7 +230,7 @@ class WorldModel(WorldModelBase):
             'reward': 0,
             'done': 0
         }
-        self.optimizer = optim.Adam(
+        self.optimizer = optim.AdamW(
             self.parameters(),
             lr=args.learning_rate,
             weight_decay=args.weight_decay
@@ -534,6 +547,15 @@ class WorldModel(WorldModelBase):
             next_token[:, 0] = action
             next_token_embed = self.token_embeddings(next_token)
             next_state_embed = self.add_next_state_positional_embeddings(next_token_embed, timestep)
+
+            """
+            try:
+                print('memory', curr_memory[0][0].shape)
+            except:
+                print('none memory')
+                pass
+            """
+
             next_output = self.transformer(
                 inputs_embeds=next_token_embed,
                 past_key_values=curr_memory
@@ -544,6 +566,9 @@ class WorldModel(WorldModelBase):
             if debug is not None:
                 tokens = logit['state'][debug].max(-1)[1].tolist()
                 print(tokens)
+                for j in range(16):
+                    print(logit['state'][debug, j, :].topk(5)[1].tolist())
+                    print(['%.2f' % x for x in logit['state'][debug, j, :].softmax(dim=0).topk(5)[0]])
                 print(self.tokenizer.decode(tokens))
                 input()
 

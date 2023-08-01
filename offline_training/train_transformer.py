@@ -39,8 +39,8 @@ def train(args):
         print('Loaded model from', args.load_model_from)
 
     # Text Encoder
-    manual_encoder_model = AutoModel.from_pretrained("bert-base-uncased")
-    manual_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    manual_encoder_model = AutoModel.from_pretrained('bert-base-uncased')
+    manual_tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
     manual_encoder = BatchedEncoder(
         model=manual_encoder_model,
         tokenizer=manual_tokenizer,
@@ -49,6 +49,9 @@ def train(args):
     )
 
     dataset = Dataset(args, seed=args.seed)
+
+    args.eval_every = len(dataset['train_games']) // (args.gradient_accum_iters * args.batch_size)
+    print(pprint.pformat(vars(args), indent=2))
 
     train_iter = dataset['train_games'].iterate_batches(batch_size=args.batch_size, cycle=True)
     train_stats = defaultdict(list)
@@ -81,7 +84,7 @@ def train(args):
                 if 'dev' not in eval_split:
                     continue
 
-                eval_iter = dataset[eval_split].iterate_batches(batch_size=args.batch_size, cycle=False)
+                eval_iter = dataset[eval_split].iterate_batches(batch_size=args.eval_batch_size, cycle=False)
 
                 with torch.no_grad():
                     eval_stats = evaluate(
@@ -92,6 +95,10 @@ def train(args):
                         manual_encoder,
                         best_metric[eval_split]
                     )
+                '''
+                for i in range(4):
+                    print(eval_stats['entity_%d_id_loss_len_0' % i])
+                '''
 
                 for k in eval_stats:
                     wandb_stats[('%s/' % eval_split) + k] = eval_stats[k]
@@ -110,6 +117,7 @@ def train(args):
         true_parsed_manual = batch['true_parsed_manual']
 
         T = batch['grid'].shape[0]
+        #T = 2
         for t in range(T - 1):
 
             mask = batch['mask'][t]
@@ -135,6 +143,9 @@ def train(args):
         for k in train_loss:
             train_stats[k].append(train_loss[k])
 
+        if (i + 1) % args.gradient_accum_iters == 0:
+            world_model.update_params()
+
 
 
 def evaluate(data_iter, args, split, world_model, manual_encoder, best_metric):
@@ -142,17 +153,14 @@ def evaluate(data_iter, args, split, world_model, manual_encoder, best_metric):
     eval_stats = defaultdict(list)
     for i, batch in enumerate(data_iter):
 
-
         debug = None
 
-        """
         print(batch['id'])
         try:
-            debug = batch['id'].index('train_games_6062')
+            debug = batch['id'].index('train_games_9856')
         except:
             pass
-        """
-
+        print(debug)
 
         world_model.reset(is_eval=True)
 
@@ -160,6 +168,7 @@ def evaluate(data_iter, args, split, world_model, manual_encoder, best_metric):
         true_parsed_manual = batch['true_parsed_manual']
 
         T = batch['grid'].shape[0]
+        #T = 2
         for t in range(T - 1):
             mask = batch['mask'][t]
             grid = batch['grid'][t]
@@ -259,6 +268,14 @@ def add_eval_stats(timestep, stats, logit, target):
         for t in range(1, timestep + 1):
             stats['state_loss_len_upto_%d' % t].extend(get_loss_list(logit['state'], target['state']))
 
+        for i in range(4):
+            stats['entity_%d_loc_loss_len_%d' % (i, timestep)].extend(
+                get_loss_list(logit['entity_%d_loc' % i], target['entity_%d_loc' % i]))
+            stats['entity_%d_id_loss_len_%d' % (i, timestep)].extend(
+                get_loss_list(logit['entity_%d_id' % i], target['entity_%d_id' % i]))
+
+
+
 def get_loss_list(logit, target):
     logit = logit.flatten(0, logit.dim() - 2)
     target = target.flatten()
@@ -278,8 +295,8 @@ def step_through(args):
         print('Loaded model from', args.load_model_from)
 
     # Text Encoder
-    manual_encoder_model = AutoModel.from_pretrained("bert-base-uncased")
-    manual_tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
+    manual_encoder_model = AutoModel.from_pretrained('bert-base-uncased')
+    manual_tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
     manual_encoder = BatchedEncoder(
         model=manual_encoder_model,
         tokenizer=manual_tokenizer,
@@ -307,63 +324,68 @@ def step_through(args):
             if done: break
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     # General arguments
-    parser.add_argument("--output", default=None, type=str, help="Local output file name or path.")
-    parser.add_argument("--seed", default=123, type=int, help="Set the seed for the model and training.")
-    parser.add_argument("--device", default=0, type=int, help="cuda device ordinal to train on.")
-    parser.add_argument("--exp_name", type=str, help="experiment name")
-    parser.add_argument("--eval_mode", type=int, default=0, help="evaluation mode")
-    parser.add_argument("--step_through_mode", type=int, default=0, help="step through each action")
-    parser.add_argument("--description_tokenizer_file", type=str, help="Tokenizer file")
-    parser.add_argument("--transformer_config_file", type=str, help="Transformer configuration file")
+    parser.add_argument('--output', default=None, type=str, help='Local output file name or path.')
+    parser.add_argument('--seed', default=123, type=int, help='Set the seed for the model and training.')
+    parser.add_argument('--device', default=0, type=int, help='cuda device ordinal to train on.')
+    parser.add_argument('--exp_name', type=str, help='experiment name')
+    parser.add_argument('--eval_mode', type=int, default=0, help='evaluation mode')
+    parser.add_argument('--step_through_mode', type=int, default=0, help='step through each action')
+    parser.add_argument('--description_tokenizer_file', type=str, help='Tokenizer file')
+    parser.add_argument('--transformer_config_file', type=str, help='Transformer configuration file')
 
-    parser.add_argument("--debug_latent_loss_only", type=int, default=0)
-    parser.add_argument("--debug_no_latent_loss", type=int, default=0)
-    parser.add_argument("--debug_zero_latent", type=int, default=0)
-    parser.add_argument("--debug_no_reward_done_input", type=int, default=1)
-    parser.add_argument("--debug_no_latent", type=int, default=0)
-    parser.add_argument("--debug_no_predict_other_ids", type=int, default=0)
-    parser.add_argument("--debug_no_manual_features", type=int, default=0)
+    parser.add_argument('--debug_latent_loss_only', type=int, default=0)
+    parser.add_argument('--debug_no_latent_loss', type=int, default=0)
+    parser.add_argument('--debug_zero_latent', type=int, default=0)
+    parser.add_argument('--debug_no_reward_done_input', type=int, default=1)
+    parser.add_argument('--debug_no_latent', type=int, default=0)
+    parser.add_argument('--debug_no_predict_other_ids', type=int, default=0)
+    parser.add_argument('--debug_no_manual_features', type=int, default=0)
 
     # text config
-    parser.add_argument("--manuals", type=str,
-        choices=['none', 'embed', 'gpt', 'oracle'], help="which type of manuals to pass to the model")
-    parser.add_argument("--gpt_groundings_path", default="chatgpt_groundings/chatgpt_grounding_for_text_all.json", type=str, help="path to chatgpt groundings")
+    parser.add_argument('--manuals', type=str,
+        choices=['none', 'embed', 'gpt', 'oracle'], help='which type of manuals to pass to the model')
+    parser.add_argument('--gpt_groundings_path', default='chatgpt_groundings/chatgpt_grounding_for_text_all.json', type=str, help='path to chatgpt groundings')
 
     # World model arguments
-    parser.add_argument("--load_model_from", default=None, help="Path to world model state dict.")
-    parser.add_argument("--hidden_dim", default=512, type=int, help="World model hidden size.")
+    parser.add_argument('--load_model_from', default=None, help='Path to world model state dict.')
+    parser.add_argument('--hidden_dim', default=512, type=int, help='World model hidden size.')
     parser.add_argument('--attr_embed_dim', type=int, default=256, help='attribute embedding size')
     parser.add_argument('--action_embed_dim', type=int, default=256, help='action embedding size')
-    parser.add_argument('--desc_key_dim', type=int, default=256, help="description key size")
+    parser.add_argument('--desc_key_dim', type=int, default=256, help='description key size')
     parser.add_argument('--keep_entity_features_for_parsed_manuals', type=int, default=1)
 
     parser.add_argument('--latent_dim', type=int, default=64)
 
-    parser.add_argument("--learning_rate", default=0.0001, type=float, help="World model learning rate.")
-    parser.add_argument("--weight_decay", default=0, type=float, help="World model weight decay.")
-    parser.add_argument("--reward_loss_weight", default=1, type=float, help="World model reward loss weight.")
-    parser.add_argument("--done_loss_weight", default=1, type=float, help="World model done loss weight.")
+    parser.add_argument('--transformer_n_layer', type=int, default=-1)
+    parser.add_argument('--transformer_n_embd', type=int, default=-1)
+    parser.add_argument('--transformer_n_head', type=int, default=-1)
+
+    parser.add_argument('--learning_rate', default=0.0001, type=float, help='World model learning rate.')
+    parser.add_argument('--weight_decay', default=0, type=float, help='World model weight decay.')
+    parser.add_argument('--reward_loss_weight', default=1, type=float, help='World model reward loss weight.')
+    parser.add_argument('--done_loss_weight', default=1, type=float, help='World model done loss weight.')
+    parser.add_argument('--gradient_accum_iters', default=2, type=int, help='Number of gradient accumulation iterations')
 
     # Dataset arguments
-    parser.add_argument("--dataset_path", default="custom_dataset/dataset_64x.pickle", help="path to the dataset file")
+    parser.add_argument('--dataset_path', default='custom_dataset/dataset_64x.pickle', help='path to the dataset file')
 
     # Training arguments
-    parser.add_argument("--train_start_state", default="initial", choices=["initial", "anywhere"], help="Which state that rollouts should start from during training")
-    parser.add_argument("--max_rollout_length", default=32, type=int, help="Max length of a rollout to train for")
-    parser.add_argument("--update_step", default=32, type=int, help="Number of steps before model update")
-    parser.add_argument("--batch_size", default=32, type=int, help="batch_size of training input")
-    parser.add_argument("--max_time", default=1000, type=float, help="max train time in hrs")
-    parser.add_argument("--max_step", default=1e6, type=int, help="max training step")
+    parser.add_argument('--train_start_state', default='initial', choices=['initial', 'anywhere'], help='Which state that rollouts should start from during training')
+    parser.add_argument('--max_rollout_length', default=32, type=int, help='Max length of a rollout to train for')
+    parser.add_argument('--update_step', default=32, type=int, help='Number of steps before model update')
+    parser.add_argument('--batch_size', default=16, type=int, help='batch_size of training input')
+    parser.add_argument('--max_time', default=1000, type=float, help='max train time in hrs')
+    parser.add_argument('--max_step', default=1e6, type=int, help='max training step')
 
     # Logging arguments
     parser.add_argument('--eval_every', default=300, type=int, help='number of steps between evaluations')
     parser.add_argument('--eval_batch_size', default=32, type=int, help='batch_size for evaluation')
     parser.add_argument('--n_frames', default=64, type=int, help='number of frames to visualize')
-    parser.add_argument('--entity', type=str, help="entity to log runs to on wandb")
+    parser.add_argument('--entity', type=str, help='entity to log runs to on wandb')
     parser.add_argument('--mode', type=str, default='online', choices=['online', 'offline'], help='mode to run wandb in')
     parser.add_argument('--use_wandb', type=int, default=0, help='log to wandb?')
 
@@ -375,7 +397,7 @@ if __name__ == "__main__":
         if not os.path.exists(args.output):
             os.makedirs(args.output)
 
-    args.device = torch.device(f"cuda:{args.device}")
+    args.device = torch.device('cuda')
 
     # seed everything
     if args.seed is not None:
@@ -387,7 +409,7 @@ if __name__ == "__main__":
     # start wandb logging
     if args.use_wandb:
         wandb.init(
-            project = "messenger",
+            project = 'messenger',
             entity = args.entity,
             name = args.exp_name + '_' + str(int(time.time())),
             mode = args.mode,
