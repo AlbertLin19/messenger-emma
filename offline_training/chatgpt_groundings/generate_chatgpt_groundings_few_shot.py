@@ -60,7 +60,6 @@ Now provide the answer for the following description. Follow the format of the p
 Description: %s
 """
 
-"""
 with open("chatgpt_grounding_for_text_all.json") as f:
     old_data = json.load(f)
 
@@ -124,21 +123,5 @@ print(len(old_data), len(new_data))
 
 with open("chatgpt_grounding_few_shot.json", "w") as f:
     json.dump(new_data, f, indent=2)
-"""
-
-"""
-with open("chatgpt_grounding_few_shot.json") as f:
-    new_data = json.load(f)
-
-for k, v in new_data.items():
-    if v[0] < 2 or v[0] > 13:
-        v[0] = 2
-    assert 0 <= v[1] < 3
-    assert 0 <= v[2] < 3
-
-with open("chatgpt_grounding_few_shot.json", "w") as f:
-    json.dump(new_data, f, indent=2)
-"""
-
 
 
