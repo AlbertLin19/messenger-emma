@@ -1,22 +1,24 @@
-'''
+"""
 Common code and utilities used by the models
-'''
+"""
 
 import torch
 
+
 class ObservationBuffer:
-    '''
+    """
     Maintains a buffer of observations along the 0-dim. Observations
     are currently expected to be a dict of np arrays. Currently keeps
     observations in a list and then stacks them via torch.stack().
     TODO: pre-allocate memory for faster calls to get_obs().
-    
+
     Parameters:
     buffer_size
         How many previous observations to track in the buffer
     device
         The device on which buffers are loaded into
-    '''
+    """
+
     def __init__(self, buffer_size, device):
         self.buffer_size = buffer_size
         self.buffer = None
@@ -32,8 +34,8 @@ class ObservationBuffer:
     def update(self, obs):
         # update the buffer by appending newest observation
         assert self.buffer, "Please initialize buffer first with reset()"
-        del self.buffer[0] # delete the oldest entry
-        self.buffer.append(obs) # append the newest observation
+        del self.buffer[0]  # delete the oldest entry
+        self.buffer.append(obs)  # append the newest observation
 
     def get_obs(self):
         # get a stack of all observations currently in the buffer
@@ -46,20 +48,21 @@ class ObservationBuffer:
 
 
 class Encoder:
-    '''
+    """
     Text-encoder class with caching for fast sentence-encoding.
     self.encoder and self.tokenizer are expected to be HuggingFace model
-    and its respective tokenizer. 
-    
+    and its respective tokenizer.
+
     Warning: currently have not implemented max cache size, watch out for
-    out of memory errors if the number of possible inputs is v. large. All 
+    out of memory errors if the number of possible inputs is v. large. All
     original Messenger descriptions combined should take < 2GB of GPU memory.
-    '''
-    def __init__(self, model, tokenizer, device: torch.device, max_length:int=36):
+    """
+
+    def __init__(self, model, tokenizer, device: torch.device, max_length: int = 36):
         self.encoder = model.to(device)
         self.tokenizer = tokenizer
         self.device = device
-        self.max_length = max_length # max sentence length
+        self.max_length = max_length  # max sentence length
         self.cache = {}
         self.tokens_cache = {}
 
@@ -75,27 +78,29 @@ class Encoder:
         return tok_device
 
     def encode(self, text):
-        '''
+        """
         Encodes the text using self.encoder and self.tokenizer. Text should be
         a list of sents, where sent is a string.
-        '''
-        encoded = [] # the final encoded texts
-        tokenized = [] # the corresponding tokens
+        """
+        encoded = []  # the final encoded texts
+        tokenized = []  # the corresponding tokens
         for sent in text:
-            if sent in self.cache.keys(): # sentence is in cache
+            if sent in self.cache.keys():  # sentence is in cache
                 encoded.append(self.cache[sent])
                 tokenized.append(self.tokens_cache[sent])
-            else: 
+            else:
                 with torch.no_grad():
                     tokens = self.tokenizer(
                         sent,
                         return_tensors="pt",
                         truncation=False,
-                        truncation_strategy='do_not_truncate',
+                        truncation_strategy="do_not_truncate",
                         padding="max_length",
-                        max_length=self.max_length
+                        max_length=self.max_length,
                     )
-                    emb = self.encoder(**self.tokens_to_device(tokens)).last_hidden_state
+                    emb = self.encoder(
+                        **self.tokens_to_device(tokens)
+                    ).last_hidden_state
                     tokens = self.tokenizer.convert_ids_to_tokens(tokens.input_ids[0])
                 encoded.append(emb)
                 tokenized.append(tokens)
@@ -103,21 +108,23 @@ class Encoder:
                 self.tokens_cache[sent] = tokens
         return torch.cat(encoded, dim=0), tokenized
 
+
 class BatchedEncoder:
-    '''
+    """
     Text-encoder class with caching for fast sentence-encoding.
     self.encoder and self.tokenizer are expected to be HuggingFace model
-    and its respective tokenizer. 
-    
+    and its respective tokenizer.
+
     Warning: currently have not implemented max cache size, watch out for
-    out of memory errors if the number of possible inputs is v. large. All 
+    out of memory errors if the number of possible inputs is v. large. All
     original Messenger descriptions combined should take < 2GB of GPU memory.
-    '''
-    def __init__(self, model, tokenizer, device: torch.device, max_length:int=36):
+    """
+
+    def __init__(self, model, tokenizer, device: torch.device, max_length: int = 36):
         self.encoder = model.to(device)
         self.tokenizer = tokenizer
         self.device = device
-        self.max_length = max_length # max sentence length
+        self.max_length = max_length  # max sentence length
         self.cache = {}
         self.tokens_cache = {}
 
@@ -133,31 +140,35 @@ class BatchedEncoder:
         return tok_device
 
     def encode(self, texts):
-        '''
+        """
         Encodes the texts using self.encoder and self.tokenizer. Texts should be
         a list of a list of sents, where sent is a string.
-        '''
-        encodeds = [] # the final encoded texts
-        tokenizeds = [] # the corresponding tokens
+        """
+        encodeds = []  # the final encoded texts
+        tokenizeds = []  # the corresponding tokens
         for text in texts:
             encoded = []
             tokenized = []
             for sent in text:
-                if sent in self.cache.keys(): # sentence is in cache
+                if sent in self.cache.keys():  # sentence is in cache
                     encoded.append(self.cache[sent])
                     tokenized.append(self.tokens_cache[sent])
-                else: 
+                else:
                     with torch.no_grad():
                         tokens = self.tokenizer(
                             sent,
                             return_tensors="pt",
                             truncation=False,
-                            truncation_strategy='do_not_truncate',
+                            truncation_strategy="do_not_truncate",
                             padding="max_length",
-                            max_length=self.max_length
+                            max_length=self.max_length,
                         )
-                        emb = self.encoder(**self.tokens_to_device(tokens)).last_hidden_state
-                        tokens = self.tokenizer.convert_ids_to_tokens(tokens.input_ids[0])
+                        emb = self.encoder(
+                            **self.tokens_to_device(tokens)
+                        ).last_hidden_state
+                        tokens = self.tokenizer.convert_ids_to_tokens(
+                            tokens.input_ids[0]
+                        )
                     encoded.append(emb)
                     tokenized.append(tokens)
                     self.cache[sent] = emb
@@ -166,15 +177,16 @@ class BatchedEncoder:
             tokenizeds.append(tokenized)
         return torch.stack(encodeds, dim=0).squeeze(dim=2), tokenizeds
 
+
 def nonzero_mean(emb):
-    '''
+    """
     Takes as input an embedding, emb. It should be H x W x L x D. with
     optional batch dimension. (H,W) is the grid dim, L the layers and
     D the embedding dimension. Returns mean of non-zero vectors along L dim.
     This is used to take care of overlapping sprites.
-    '''
+    """
     # Count the number of non-zero vectors
     non_zero = torch.sum(torch.norm(emb, dim=-1) > 0, dim=-1)
     non_zero = non_zero.unsqueeze(-1).float()  # broadcasting
-    non_zero[non_zero == 0] = 1 # prevent division by zero
+    non_zero[non_zero == 0] = 1  # prevent division by zero
     return torch.sum(emb, dim=-2) / non_zero

@@ -1,6 +1,6 @@
-'''
+"""
 Implements the EMMA model
-'''
+"""
 
 import random
 
@@ -14,16 +14,26 @@ from transformers import AutoModel, AutoTokenizer
 
 from messenger.models.utils import nonzero_mean, Encoder
 
-class EMMA(nn.Module):
-    def __init__(self, state_h=10, state_w=10, action_dim=5, hist_len=3, n_latent_var=128,
-                emb_dim=256, f_maps=64, kernel_size=2, n_hidden_layers=1, device=None):
 
+class EMMA(nn.Module):
+    def __init__(
+        self,
+        state_h=10,
+        state_w=10,
+        action_dim=5,
+        hist_len=3,
+        n_latent_var=128,
+        emb_dim=256,
+        f_maps=64,
+        kernel_size=2,
+        n_hidden_layers=1,
+        device=None,
+    ):
         super().__init__()
 
         # calculate dimensions after flattening the conv layer output
-        lin_dim = f_maps * (state_h - (kernel_size - 1)) * (
-            state_w - (kernel_size - 1))
-        self.conv = nn.Conv2d(hist_len*256, f_maps, kernel_size) # conv layer
+        lin_dim = f_maps * (state_h - (kernel_size - 1)) * (state_w - (kernel_size - 1))
+        self.conv = nn.Conv2d(hist_len * 256, f_maps, kernel_size)  # conv layer
 
         self.state_h = state_h
         self.state_w = state_w
@@ -31,37 +41,36 @@ class EMMA(nn.Module):
         self.emb_dim = emb_dim
         self.attn_scale = sqrt(emb_dim)
 
-        self.sprite_emb = nn.Embedding(25, emb_dim, padding_idx=0) # sprite embedding layer
+        self.sprite_emb = nn.Embedding(
+            25, emb_dim, padding_idx=0
+        )  # sprite embedding layer
 
-        hidden_layers = (nn.Linear(n_latent_var, n_latent_var), nn.LeakyReLU())*n_hidden_layers
+        hidden_layers = (
+            nn.Linear(n_latent_var, n_latent_var),
+            nn.LeakyReLU(),
+        ) * n_hidden_layers
         self.action_layer = nn.Sequential(
-                nn.Linear(lin_dim, n_latent_var),
-                nn.LeakyReLU(),
-                *hidden_layers,
-                nn.Linear(n_latent_var, action_dim),
-                nn.Softmax(dim=-1)
-                )
+            nn.Linear(lin_dim, n_latent_var),
+            nn.LeakyReLU(),
+            *hidden_layers,
+            nn.Linear(n_latent_var, action_dim),
+            nn.Softmax(dim=-1)
+        )
 
         # critic
         self.value_layer = nn.Sequential(
-                nn.Linear(lin_dim, n_latent_var),
-                nn.LeakyReLU(),
-                *hidden_layers,
-                nn.Linear(n_latent_var, 1)
-                )
+            nn.Linear(lin_dim, n_latent_var),
+            nn.LeakyReLU(),
+            *hidden_layers,
+            nn.Linear(n_latent_var, 1)
+        )
 
         # key value transforms
         self.txt_key = nn.Linear(768, emb_dim)
-        self.scale_key = nn.Sequential(
-            nn.Linear(768, 1),
-            nn.Softmax(dim=-2)
-        )
+        self.scale_key = nn.Sequential(nn.Linear(768, 1), nn.Softmax(dim=-2))
 
         self.txt_val = nn.Linear(768, emb_dim)
-        self.scale_val = nn.Sequential(
-            nn.Linear(768, 1),
-            nn.Softmax(dim=-2)
-        )
+        self.scale_val = nn.Sequential(nn.Linear(768, 1), nn.Softmax(dim=-2))
 
         if device:
             self.device = device
@@ -71,26 +80,28 @@ class EMMA(nn.Module):
         # get the text encoder
         text_model = AutoModel.from_pretrained("bert-base-uncased")
         tokenizer = AutoTokenizer.from_pretrained("bert-base-uncased")
-        self.encoder = Encoder(model=text_model, tokenizer=tokenizer, device=self.device)
+        self.encoder = Encoder(
+            model=text_model, tokenizer=tokenizer, device=self.device
+        )
         self.to(device)
 
     def to(self, device):
-        '''
+        """
         Override the .to() method so that we can store the device as an attribute
         and also update the device for self.encoder (which does not inherit nn.Module)
-        '''
+        """
         self.device = device
         self.encoder.to(device)
         return super().to(device)
 
     def attention(self, query, key, value):
-        '''
+        """
         Cell by cell attention mechanism. Uses the sprite embeddings as query. Key is
         text embeddings
-        '''
-        kq = query @ key.t() # dot product attention
-        mask = (kq != 0) # keep zeroed-out entries zero
-        kq = kq / self.attn_scale # scale to prevent vanishing grads
+        """
+        kq = query @ key.t()  # dot product attention
+        mask = kq != 0  # keep zeroed-out entries zero
+        kq = kq / self.attn_scale  # scale to prevent vanishing grads
         weights = F.softmax(kq, dim=-1) * mask
         return torch.mean(weights.unsqueeze(-1) * value, dim=-2), weights
 
@@ -110,7 +121,7 @@ class EMMA(nn.Module):
 
         # Attention
         key = self.txt_key(temb)
-        key_scale = self.scale_key(temb) # (num sent, sent_len, 1)
+        key_scale = self.scale_key(temb)  # (num sent, sent_len, 1)
         key = key * key_scale
         key = torch.sum(key, dim=1)
 
@@ -137,12 +148,12 @@ class EMMA(nn.Module):
             action_dists = Categorical(logits=action_logits)
             actions = action_dists.sample()
             return actions.item()
-            #return np.random.choice(range(len(action_probs)), p=action_probs.detach().cpu().numpy())
+            # return np.random.choice(range(len(action_probs)), p=action_probs.detach().cpu().numpy())
 
         action = torch.argmax(action_probs).item()
         if deterministic:
             return action
 
-        if random.random() < 0.05: # random action with 0.05 prob
+        if random.random() < 0.05:  # random action with 0.05 prob
             action = random.randrange(0, self.action_dim)
         return action

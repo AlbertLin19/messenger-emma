@@ -5,30 +5,36 @@ import torch.optim as optim
 import numpy as np
 
 from offline_training.batched_world_model.modules import BatchedEncoder, BatchedDecoder
-from offline_training.batched_world_model.utils import batched_convert_grid_to_multilabel, batched_convert_multilabel_to_emb, batched_convert_prob_to_multilabel
+from offline_training.batched_world_model.utils import (
+    batched_convert_grid_to_multilabel,
+    batched_convert_multilabel_to_emb,
+    batched_convert_prob_to_multilabel,
+)
+
 
 class BatchedWorldModel(nn.Module):
-
-    def __init__(self, key_type=None,
-                       key_dim=None,
-                       val_type=None,
-                       val_dim=None,
-                       memory_type=None,
-                       latent_size=None,
-                       hidden_size=None,
-                       batch_size=None,
-                       learning_rate=None,
-                       weight_decay=None,
-                       reward_loss_weight=None,
-                       done_loss_weight=None,
-                       prediction_type=None,
-                       pred_multilabel_threshold=None,
-                       refine_pred_multilabel=None,
-                       dropout_prob=None,
-                       dropout_loc=None,
-                       shuffle_ids=None,
-                       device=None):
-
+    def __init__(
+        self,
+        key_type=None,
+        key_dim=None,
+        val_type=None,
+        val_dim=None,
+        memory_type=None,
+        latent_size=None,
+        hidden_size=None,
+        batch_size=None,
+        learning_rate=None,
+        weight_decay=None,
+        reward_loss_weight=None,
+        done_loss_weight=None,
+        prediction_type=None,
+        pred_multilabel_threshold=None,
+        refine_pred_multilabel=None,
+        dropout_prob=None,
+        dropout_loc=None,
+        shuffle_ids=None,
+        device=None,
+    ):
         super().__init__()
 
         # world model parameters
@@ -52,11 +58,14 @@ class BatchedWorldModel(nn.Module):
             self.attn_scale = np.sqrt(key_dim)
 
             # descriptor key module
-            self.txt_key = nn.Linear(768, key_dim).to(device) # token embedding -> key embedding
-            self.scale_key = nn.Sequential(                   # linear combination weights for key embeddings
-                nn.Linear(768, 1),
-                nn.Softmax(dim=-2)
-            ).to(device)
+            self.txt_key = nn.Linear(768, key_dim).to(
+                device
+            )  # token embedding -> key embedding
+            self.scale_key = (
+                nn.Sequential(  # linear combination weights for key embeddings
+                    nn.Linear(768, 1), nn.Softmax(dim=-2)
+                ).to(device)
+            )
 
         elif key_type == "emma-mlp_scale":
             # entity query vector
@@ -64,47 +73,70 @@ class BatchedWorldModel(nn.Module):
             self.attn_scale = np.sqrt(key_dim)
 
             # descriptor key module
-            self.txt_key = nn.Linear(768, key_dim).to(device) # token embedding -> key embedding
-            self.scale_key = nn.Sequential(                   # linear combination weights for key embeddings
-                nn.Linear(768, 384),
-                nn.ReLU(),
-                nn.Linear(384, 1),
-                nn.Softmax(dim=-2)
-            ).to(device)
+            self.txt_key = nn.Linear(768, key_dim).to(
+                device
+            )  # token embedding -> key embedding
+            self.scale_key = (
+                nn.Sequential(  # linear combination weights for key embeddings
+                    nn.Linear(768, 384),
+                    nn.ReLU(),
+                    nn.Linear(384, 1),
+                    nn.Softmax(dim=-2),
+                ).to(device)
+            )
 
         else:
             raise NotImplementedError
 
         if val_type == "oracle":
             # avatar value embeddings
-            self.avatar_no_message_val_emb = torch.tensor([0, 0, 0, 0, 0, 0, 1], device=device)
-            self.avatar_with_message_val_emb = torch.tensor([0, 0, 0, 0, 0, 0, 1], device=device)
+            self.avatar_no_message_val_emb = torch.tensor(
+                [0, 0, 0, 0, 0, 0, 1], device=device
+            )
+            self.avatar_with_message_val_emb = torch.tensor(
+                [0, 0, 0, 0, 0, 0, 1], device=device
+            )
 
         elif val_type == "emma":
             # avatar value embeddings
-            self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
-            self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
+            self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(
+                torch.randn(val_dim)
+            )
+            self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(
+                torch.randn(val_dim)
+            )
 
             # descriptor value module
-            self.txt_val = nn.Linear(768, val_dim).to(device) # token embedding -> value embedding
-            self.scale_val = nn.Sequential(                   # linear combination weights for value embeddings
-                nn.Linear(768, 1),
-                nn.Softmax(dim=-2)
-            ).to(device)
+            self.txt_val = nn.Linear(768, val_dim).to(
+                device
+            )  # token embedding -> value embedding
+            self.scale_val = (
+                nn.Sequential(  # linear combination weights for value embeddings
+                    nn.Linear(768, 1), nn.Softmax(dim=-2)
+                ).to(device)
+            )
 
         elif val_type == "emma-mlp_scale":
             # avatar value embeddings
-            self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
-            self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(torch.randn(val_dim))
+            self.avatar_no_message_val_emb = torch.nn.parameter.Parameter(
+                torch.randn(val_dim)
+            )
+            self.avatar_with_message_val_emb = torch.nn.parameter.Parameter(
+                torch.randn(val_dim)
+            )
 
             # descriptor value module
-            self.txt_val = nn.Linear(768, val_dim).to(device) # token embedding -> value embedding
-            self.scale_val = nn.Sequential(                   # linear combination weights for value embeddings
-                nn.Linear(768, 384),
-                nn.ReLU(),
-                nn.Linear(384, 1),
-                nn.Softmax(dim=-2)
-            ).to(device)
+            self.txt_val = nn.Linear(768, val_dim).to(
+                device
+            )  # token embedding -> value embedding
+            self.scale_val = (
+                nn.Sequential(  # linear combination weights for value embeddings
+                    nn.Linear(768, 384),
+                    nn.ReLU(),
+                    nn.Linear(384, 1),
+                    nn.Softmax(dim=-2),
+                ).to(device)
+            )
 
         elif val_type == "none":
             pass
@@ -116,25 +148,41 @@ class BatchedWorldModel(nn.Module):
 
         # i.e. grid(i, j) is probability that sprite type j exists at location i (independently of other (i, j))
         if self.prediction_type == "existence":
-            self.pos_weight = 10*torch.ones(17, device=device) # loss weighting for existence of sprites, reweighted due to large bias of nonexistence of sprites
-            self.pos_weight[0] = 3 / 100 # empty sprite, reweighted due to large bias of existence of empty sprite
-            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device) # which sprites to use for eval metrics
+            self.pos_weight = 10 * torch.ones(
+                17, device=device
+            )  # loss weighting for existence of sprites, reweighted due to large bias of nonexistence of sprites
+            self.pos_weight[0] = (
+                3 / 100
+            )  # empty sprite, reweighted due to large bias of existence of empty sprite
+            self.relevant_cls_idxs = torch.tensor(
+                [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device
+            )  # which sprites to use for eval metrics
 
         # i.e. grid(i, j) is probability that location i is classified as sprite type j (grid(i, :) sums to 1)
         elif self.prediction_type == "class":
-            self.cls_weight = torch.ones(17, device=device) # loss weighting for classification of sprite types
-            self.cls_weight[0] = 3 / 100 # empty type, reweighted due to large bias of empty cell type
-            self.relevant_cls_idxs = torch.tensor([0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device) # which sprites to use for eval metrics
+            self.cls_weight = torch.ones(
+                17, device=device
+            )  # loss weighting for classification of sprite types
+            self.cls_weight[0] = (
+                3 / 100
+            )  # empty type, reweighted due to large bias of empty cell type
+            self.relevant_cls_idxs = torch.tensor(
+                [0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device
+            )  # which sprites to use for eval metrics
 
         # i.e. grid(i, j) is probability that sprite type j is at location i (grid(:, j) sums to 1)
         elif self.prediction_type == "location":
-            self.loc_weight = torch.ones(101, device=device) # loss reweighting for locations, no reweighting
-            self.relevant_cls_idxs = torch.tensor([2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device) # which sprites to use for eval metrics
+            self.loc_weight = torch.ones(
+                101, device=device
+            )  # loss reweighting for locations, no reweighting
+            self.relevant_cls_idxs = torch.tensor(
+                [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16], device=device
+            )  # which sprites to use for eval metrics
 
         else:
             raise NotImplementedError
 
-        emb_dim = val_dim + len(self.relevant_cls_idxs) # size of input to encoder
+        emb_dim = val_dim + len(self.relevant_cls_idxs)  # size of input to encoder
 
         # input -> latent
         self.encoder = nn.Sequential(
@@ -155,16 +203,30 @@ class BatchedWorldModel(nn.Module):
             raise NotImplementedError
 
         # hidden -> latent
-        self.projection = nn.Linear(in_features=hidden_size, out_features=latent_size).to(device)
+        self.projection = nn.Linear(
+            in_features=hidden_size, out_features=latent_size
+        ).to(device)
 
         # latent -> grid output
         if prediction_type == "location":
-            self.nonexistence = nn.Linear(in_features=latent_size, out_features=17).to(device)
+            self.nonexistence = nn.Linear(in_features=latent_size, out_features=17).to(
+                device
+            )
         self.decoder = BatchedDecoder(emb_dim, latent_size).to(device)
         self.detector = nn.Sequential(
-            nn.Conv2d(in_channels=emb_dim, out_channels=(emb_dim + 17) // 2, kernel_size=1, stride=1),
+            nn.Conv2d(
+                in_channels=emb_dim,
+                out_channels=(emb_dim + 17) // 2,
+                kernel_size=1,
+                stride=1,
+            ),
             nn.ReLU(),
-            nn.Conv2d(in_channels=(emb_dim + 17) // 2, out_channels=17, kernel_size=1, stride=1),
+            nn.Conv2d(
+                in_channels=(emb_dim + 17) // 2,
+                out_channels=17,
+                kernel_size=1,
+                stride=1,
+            ),
         ).to(device)
 
         # latent -> reward output
@@ -180,7 +242,9 @@ class BatchedWorldModel(nn.Module):
         ).to(device)
 
         # training parameters
-        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        self.optimizer = optim.Adam(
+            self.parameters(), lr=learning_rate, weight_decay=weight_decay
+        )
         self.reward_loss_weight = reward_loss_weight
         self.done_loss_weight = done_loss_weight
 
@@ -239,12 +303,25 @@ class BatchedWorldModel(nn.Module):
     def detect(self, embs):
         return self.detector(embs.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
 
-    def forward(self, multilabels, manuals, ground_truths, actions, lstm_states, shuffled_ids):
-        embeddings = batched_convert_multilabel_to_emb(multilabels, manuals, ground_truths, self)
+    def forward(
+        self, multilabels, manuals, ground_truths, actions, lstm_states, shuffled_ids
+    ):
+        embeddings = batched_convert_multilabel_to_emb(
+            multilabels, manuals, ground_truths, self
+        )
         if self.shuffle_ids:
-            embeddings[..., :len(self.relevant_cls_idxs)] = torch.gather(input=embeddings[..., :len(self.relevant_cls_idxs)], dim=-1, index=shuffled_ids.unsqueeze(1).unsqueeze(1).expand(-1, 10, 10, -1))
+            embeddings[..., : len(self.relevant_cls_idxs)] = torch.gather(
+                input=embeddings[..., : len(self.relevant_cls_idxs)],
+                dim=-1,
+                index=shuffled_ids.unsqueeze(1).unsqueeze(1).expand(-1, 10, 10, -1),
+            )
         if "sprite" in self.dropout_loc:
-            F.dropout(embeddings[..., :len(self.relevant_cls_idxs)], p=self.dropout_prob, training=self.training, inplace=True)
+            F.dropout(
+                embeddings[..., : len(self.relevant_cls_idxs)],
+                p=self.dropout_prob,
+                training=self.training,
+                inplace=True,
+            )
         latents = self.encode(embeddings)
         actions = F.one_hot(actions, num_classes=5)
         mem_ins = torch.cat((latents, actions), dim=-1).unsqueeze(0)
@@ -261,23 +338,52 @@ class BatchedWorldModel(nn.Module):
             pred_nonexistence_logits = self.nonexistence(pred_latents)
         pred_grid_logits = self.detect(self.decode(pred_latents))
         if self.shuffle_ids:
-            pred_grid_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_grid_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1).unsqueeze(1).unsqueeze(1).expand(-1, 10, 10, -1))
-            pred_nonexistence_logits[..., self.relevant_cls_idxs] = torch.gather(input=pred_nonexistence_logits[..., self.relevant_cls_idxs], dim=-1, index=torch.argsort(shuffled_ids, dim=-1))
+            pred_grid_logits[..., self.relevant_cls_idxs] = torch.gather(
+                input=pred_grid_logits[..., self.relevant_cls_idxs],
+                dim=-1,
+                index=torch.argsort(shuffled_ids, dim=-1)
+                .unsqueeze(1)
+                .unsqueeze(1)
+                .expand(-1, 10, 10, -1),
+            )
+            pred_nonexistence_logits[..., self.relevant_cls_idxs] = torch.gather(
+                input=pred_nonexistence_logits[..., self.relevant_cls_idxs],
+                dim=-1,
+                index=torch.argsort(shuffled_ids, dim=-1),
+            )
         pred_rewards = self.reward_head(mem_outs.squeeze(0))
         pred_done_logits = self.done_head(mem_outs.squeeze(0))
-        return ((pred_grid_logits, pred_nonexistence_logits), pred_rewards, pred_done_logits), (hidden_states, cell_states)
+        return (
+            (pred_grid_logits, pred_nonexistence_logits),
+            pred_rewards,
+            pred_done_logits,
+        ), (hidden_states, cell_states)
 
     def grid_loss(self, grid_logits, nonexistence_logits, probs):
         if self.prediction_type == "existence":
-            loss = F.binary_cross_entropy_with_logits(grid_logits, probs, pos_weight=self.pos_weight)
+            loss = F.binary_cross_entropy_with_logits(
+                grid_logits, probs, pos_weight=self.pos_weight
+            )
         elif self.prediction_type == "class":
-            loss = F.cross_entropy(grid_logits.flatten(0, 2), probs.flatten(0, 2), weight=self.cls_weight)
+            loss = F.cross_entropy(
+                grid_logits.flatten(0, 2), probs.flatten(0, 2), weight=self.cls_weight
+            )
         elif self.prediction_type == "location":
-            all_logits = torch.cat((grid_logits.permute(0, 3, 1, 2).flatten(2, 3),
-                                    nonexistence_logits.unsqueeze(-1)), dim=-1).flatten(0, 1)
-            nonexistence_probs = 1.0*(torch.sum(probs, dim=(1, 2)) <= 0)
-            all_probs = torch.cat((probs.permute(0, 3, 1, 2).flatten(2, 3),
-                                   nonexistence_probs.unsqueeze(-1)), dim=-1).flatten(0, 1)
+            all_logits = torch.cat(
+                (
+                    grid_logits.permute(0, 3, 1, 2).flatten(2, 3),
+                    nonexistence_logits.unsqueeze(-1),
+                ),
+                dim=-1,
+            ).flatten(0, 1)
+            nonexistence_probs = 1.0 * (torch.sum(probs, dim=(1, 2)) <= 0)
+            all_probs = torch.cat(
+                (
+                    probs.permute(0, 3, 1, 2).flatten(2, 3),
+                    nonexistence_probs.unsqueeze(-1),
+                ),
+                dim=-1,
+            ).flatten(0, 1)
             loss = F.cross_entropy(all_logits, all_probs, weight=self.loc_weight)
         else:
             raise NotImplementedError
@@ -296,7 +402,13 @@ class BatchedWorldModel(nn.Module):
         elif self.prediction_type == "class":
             probs = F.softmax(grid_logits, dim=-1)
         elif self.prediction_type == "location":
-            all_logits = torch.cat((grid_logits.permute(0, 3, 1, 2).flatten(2, 3), nonexistence_logits.unsqueeze(-1)), dim=-1)
+            all_logits = torch.cat(
+                (
+                    grid_logits.permute(0, 3, 1, 2).flatten(2, 3),
+                    nonexistence_logits.unsqueeze(-1),
+                ),
+                dim=-1,
+            )
             all_probs = F.softmax(all_logits, dim=-1)
             probs = all_probs[..., :-1].unflatten(-1, (10, 10)).permute(0, 2, 3, 1)
             nonexistence_probs = all_probs[..., -1]
@@ -310,7 +422,9 @@ class BatchedWorldModel(nn.Module):
         elif self.prediction_type == "class":
             probs = multilabels / multilabels.sum(dim=-1, keepdim=True)
         elif self.prediction_type == "location":
-            probs = multilabels.float() # assumes only at most one entity per class exists
+            probs = (
+                multilabels.float()
+            )  # assumes only at most one entity per class exists
         else:
             raise NotImplementedError
         return probs
@@ -318,40 +432,104 @@ class BatchedWorldModel(nn.Module):
     # reset hidden states for real prediction
     def real_state_reset(self, init_grids, idxs=None):
         if idxs is None:
-            self.real_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
-            self.real_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
-            self.real_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            self.real_hidden_states = torch.zeros(
+                (1, self.batch_size, self.hidden_size), device=self.device
+            )
+            self.real_cell_states = torch.zeros(
+                (1, self.batch_size, self.hidden_size), device=self.device
+            )
+            self.real_entity_ids = torch.max(
+                init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1
+            ).values
             self.real_shuffled_ids = None
             if self.shuffle_ids:
-                self.real_shuffled_ids = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (self.batch_size, len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
+                self.real_shuffled_ids = (
+                    torch.from_numpy(
+                        np.random.default_rng().permuted(
+                            np.broadcast_to(
+                                np.arange(len(self.relevant_cls_idxs)),
+                                (self.batch_size, len(self.relevant_cls_idxs)),
+                            ),
+                            axis=-1,
+                        )
+                    )
+                    .long()
+                    .to(self.device)
+                )
         else:
             init_grids = init_grids[idxs]
             self.real_hidden_states[:, idxs] = 0
             self.real_cell_states[:, idxs] = 0
-            self.real_entity_ids[idxs] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            self.real_entity_ids[idxs] = torch.max(
+                init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1
+            ).values
             if self.shuffle_ids:
-                self.real_shuffled_ids[idxs] = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (len(idxs), len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
-
+                self.real_shuffled_ids[idxs] = (
+                    torch.from_numpy(
+                        np.random.default_rng().permuted(
+                            np.broadcast_to(
+                                np.arange(len(self.relevant_cls_idxs)),
+                                (len(idxs), len(self.relevant_cls_idxs)),
+                            ),
+                            axis=-1,
+                        )
+                    )
+                    .long()
+                    .to(self.device)
+                )
 
     # reset hidden states for imag prediction
     def imag_state_reset(self, init_grids, idxs=None):
         if idxs is None:
-            self.imag_hidden_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
-            self.imag_cell_states = torch.zeros((1, self.batch_size, self.hidden_size), device=self.device)
+            self.imag_hidden_states = torch.zeros(
+                (1, self.batch_size, self.hidden_size), device=self.device
+            )
+            self.imag_cell_states = torch.zeros(
+                (1, self.batch_size, self.hidden_size), device=self.device
+            )
             self.imag_old_multilabels = batched_convert_grid_to_multilabel(init_grids)
-            self.imag_entity_ids = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            self.imag_entity_ids = torch.max(
+                init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1
+            ).values
             self.imag_shuffled_ids = None
             if self.shuffle_ids:
-                self.imag_shuffled_ids = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (self.batch_size, len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
+                self.imag_shuffled_ids = (
+                    torch.from_numpy(
+                        np.random.default_rng().permuted(
+                            np.broadcast_to(
+                                np.arange(len(self.relevant_cls_idxs)),
+                                (self.batch_size, len(self.relevant_cls_idxs)),
+                            ),
+                            axis=-1,
+                        )
+                    )
+                    .long()
+                    .to(self.device)
+                )
         else:
             init_grids = init_grids[idxs]
             self.imag_hidden_states[:, idxs] = 0
             self.imag_cell_states[:, idxs] = 0
-            self.imag_old_multilabels[idxs] = batched_convert_grid_to_multilabel(init_grids)
-            self.imag_entity_ids[idxs] = torch.max(init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1).values
+            self.imag_old_multilabels[idxs] = batched_convert_grid_to_multilabel(
+                init_grids
+            )
+            self.imag_entity_ids[idxs] = torch.max(
+                init_grids[..., :-1].flatten(start_dim=1, end_dim=2), dim=1
+            ).values
             if self.shuffle_ids:
-                self.imag_shuffled_ids[idxs] = torch.from_numpy(np.random.default_rng().permuted(np.broadcast_to(np.arange(len(self.relevant_cls_idxs)), (len(idxs), len(self.relevant_cls_idxs))), axis=-1)).long().to(self.device)
-
+                self.imag_shuffled_ids[idxs] = (
+                    torch.from_numpy(
+                        np.random.default_rng().permuted(
+                            np.broadcast_to(
+                                np.arange(len(self.relevant_cls_idxs)),
+                                (len(idxs), len(self.relevant_cls_idxs)),
+                            ),
+                            axis=-1,
+                        )
+                    )
+                    .long()
+                    .to(self.device)
+                )
 
     # detach hidden states for real prediction
     def real_state_detach(self):
@@ -365,63 +543,141 @@ class BatchedWorldModel(nn.Module):
         self.imag_old_multilabels = self.imag_old_multilabels.detach()
 
     # make real prediction and accumulate real loss
-    def real_step(self, old_grids, manuals, ground_truths, actions, grids, rewards, dones, backprop_idxs):
+    def real_step(
+        self,
+        old_grids,
+        manuals,
+        ground_truths,
+        actions,
+        grids,
+        rewards,
+        dones,
+        backprop_idxs,
+    ):
         old_multilabels = batched_convert_grid_to_multilabel(old_grids)
         multilabels = batched_convert_grid_to_multilabel(grids)
         probs = self.multilabel_to_prob(multilabels)
         done_probs = dones.float()
 
-        (pred_loc_logits, pred_rewards, pred_done_logits), (self.real_hidden_states, self.real_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.real_hidden_states, self.real_cell_states), self.real_shuffled_ids)
+        (pred_loc_logits, pred_rewards, pred_done_logits), (
+            self.real_hidden_states,
+            self.real_cell_states,
+        ) = self.forward(
+            old_multilabels,
+            manuals,
+            ground_truths,
+            actions,
+            (self.real_hidden_states, self.real_cell_states),
+            self.real_shuffled_ids,
+        )
         pred_grid_logits, pred_nonexistence_logits = pred_loc_logits
         n_backprops = len(backprop_idxs)
-        self.real_grid_loss_total += n_backprops*self.grid_loss(
-                pred_grid_logits[backprop_idxs][..., self.relevant_cls_idxs],
-                pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs],
-                probs[backprop_idxs][..., self.relevant_cls_idxs]
+        self.real_grid_loss_total += n_backprops * self.grid_loss(
+            pred_grid_logits[backprop_idxs][..., self.relevant_cls_idxs],
+            pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs],
+            probs[backprop_idxs][..., self.relevant_cls_idxs],
         )
-        self.real_reward_loss_total += n_backprops*self.reward_loss(pred_rewards[backprop_idxs], rewards[backprop_idxs])
-        self.real_done_loss_total += n_backprops*self.done_loss(pred_done_logits[backprop_idxs], done_probs[backprop_idxs])
+        self.real_reward_loss_total += n_backprops * self.reward_loss(
+            pred_rewards[backprop_idxs], rewards[backprop_idxs]
+        )
+        self.real_done_loss_total += n_backprops * self.done_loss(
+            pred_done_logits[backprop_idxs], done_probs[backprop_idxs]
+        )
         self.real_backprop_count += n_backprops
 
         with torch.no_grad():
-            pred_grid_probs, pred_nonexistence_probs = self.logit_to_prob(pred_grid_logits, pred_nonexistence_logits)
-            pred_multilabels = batched_convert_prob_to_multilabel(pred_grid_probs, pred_nonexistence_probs, self.prediction_type, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.real_entity_ids)
+            pred_grid_probs, pred_nonexistence_probs = self.logit_to_prob(
+                pred_grid_logits, pred_nonexistence_logits
+            )
+            pred_multilabels = batched_convert_prob_to_multilabel(
+                pred_grid_probs,
+                pred_nonexistence_probs,
+                self.prediction_type,
+                self.pred_multilabel_threshold,
+                self.refine_pred_multilabel,
+                self.real_entity_ids,
+            )
             pred_done_probs = torch.sigmoid(pred_done_logits)
-        return (((pred_grid_probs, pred_nonexistence_probs), pred_multilabels), pred_rewards, pred_done_probs), ((probs, multilabels), rewards, done_probs)
+        return (
+            ((pred_grid_probs, pred_nonexistence_probs), pred_multilabels),
+            pred_rewards,
+            pred_done_probs,
+        ), ((probs, multilabels), rewards, done_probs)
 
     # make imag prediction and accumulate imag loss
-    def imag_step(self, manuals, ground_truths, actions, grids, rewards, dones, backprop_idxs):
+    def imag_step(
+        self, manuals, ground_truths, actions, grids, rewards, dones, backprop_idxs
+    ):
         old_multilabels = self.imag_old_multilabels
         multilabels = batched_convert_grid_to_multilabel(grids)
         probs = self.multilabel_to_prob(multilabels)
         done_probs = dones.float()
 
-        (pred_loc_logits, pred_rewards, pred_done_logits), (self.imag_hidden_states, self.imag_cell_states) = self.forward(old_multilabels, manuals, ground_truths, actions, (self.imag_hidden_states, self.imag_cell_states), self.imag_shuffled_ids)
+        (pred_loc_logits, pred_rewards, pred_done_logits), (
+            self.imag_hidden_states,
+            self.imag_cell_states,
+        ) = self.forward(
+            old_multilabels,
+            manuals,
+            ground_truths,
+            actions,
+            (self.imag_hidden_states, self.imag_cell_states),
+            self.imag_shuffled_ids,
+        )
         pred_grid_logits, pred_nonexistence_logits = pred_loc_logits
         n_backprops = len(backprop_idxs)
-        self.imag_grid_loss_total += n_backprops*self.grid_loss(pred_grid_logits[backprop_idxs][..., self.relevant_cls_idxs], pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs], probs[backprop_idxs][..., self.relevant_cls_idxs])
-        self.imag_reward_loss_total += n_backprops*self.reward_loss(pred_rewards[backprop_idxs], rewards[backprop_idxs])
-        self.imag_done_loss_total += n_backprops*self.done_loss(pred_done_logits[backprop_idxs], done_probs[backprop_idxs])
+        self.imag_grid_loss_total += n_backprops * self.grid_loss(
+            pred_grid_logits[backprop_idxs][..., self.relevant_cls_idxs],
+            pred_nonexistence_logits[backprop_idxs][..., self.relevant_cls_idxs],
+            probs[backprop_idxs][..., self.relevant_cls_idxs],
+        )
+        self.imag_reward_loss_total += n_backprops * self.reward_loss(
+            pred_rewards[backprop_idxs], rewards[backprop_idxs]
+        )
+        self.imag_done_loss_total += n_backprops * self.done_loss(
+            pred_done_logits[backprop_idxs], done_probs[backprop_idxs]
+        )
         self.imag_backprop_count += n_backprops
 
         with torch.no_grad():
-            pred_grid_probs, pred_nonexistence_probs = self.logit_to_prob(pred_grid_logits, pred_nonexistence_logits)
-            pred_multilabels = batched_convert_prob_to_multilabel(pred_grid_probs, pred_nonexistence_probs, self.prediction_type, self.pred_multilabel_threshold, self.refine_pred_multilabel, self.imag_entity_ids)
+            pred_grid_probs, pred_nonexistence_probs = self.logit_to_prob(
+                pred_grid_logits, pred_nonexistence_logits
+            )
+            pred_multilabels = batched_convert_prob_to_multilabel(
+                pred_grid_probs,
+                pred_nonexistence_probs,
+                self.prediction_type,
+                self.pred_multilabel_threshold,
+                self.refine_pred_multilabel,
+                self.imag_entity_ids,
+            )
             self.imag_old_multilabels = pred_multilabels
             pred_done_probs = torch.sigmoid(pred_done_logits)
-        return (((pred_grid_probs, pred_nonexistence_probs), pred_multilabels), pred_rewards, pred_done_probs), ((probs, multilabels), rewards, done_probs)
+        return (
+            ((pred_grid_probs, pred_nonexistence_probs), pred_multilabels),
+            pred_rewards,
+            pred_done_probs,
+        ), ((probs, multilabels), rewards, done_probs)
 
     # update model via real loss
     def real_loss_update(self):
         self.optimizer.zero_grad()
-        real_loss_mean = (self.real_grid_loss_total + self.reward_loss_weight*self.real_reward_loss_total + self.done_loss_weight*self.real_done_loss_total) / self.real_backprop_count
+        real_loss_mean = (
+            self.real_grid_loss_total
+            + self.reward_loss_weight * self.real_reward_loss_total
+            + self.done_loss_weight * self.real_done_loss_total
+        ) / self.real_backprop_count
         real_loss_mean.backward()
         self.optimizer.step()
 
     # update model via imag loss
     def imag_loss_update(self):
         self.optimizer.zero_grad()
-        imag_loss_mean = (self.imag_grid_loss_total + self.reward_loss_weight*self.imag_reward_loss_total + self.done_loss_weight*self.imag_done_loss_total) / self.imag_backprop_count
+        imag_loss_mean = (
+            self.imag_grid_loss_total
+            + self.reward_loss_weight * self.imag_reward_loss_total
+            + self.done_loss_weight * self.imag_done_loss_total
+        ) / self.imag_backprop_count
         imag_loss_mean.backward()
         self.optimizer.step()
 
@@ -429,24 +685,46 @@ class BatchedWorldModel(nn.Module):
     def real_loss_reset(self):
         with torch.no_grad():
             real_grid_loss_mean = self.real_grid_loss_total / self.real_backprop_count
-            real_reward_loss_mean = self.real_reward_loss_total / self.real_backprop_count
+            real_reward_loss_mean = (
+                self.real_reward_loss_total / self.real_backprop_count
+            )
             real_done_loss_mean = self.real_done_loss_total / self.real_backprop_count
-            real_loss_mean = (self.real_grid_loss_total + self.reward_loss_weight*self.real_reward_loss_total + self.done_loss_weight*self.real_done_loss_total) / self.real_backprop_count
+            real_loss_mean = (
+                self.real_grid_loss_total
+                + self.reward_loss_weight * self.real_reward_loss_total
+                + self.done_loss_weight * self.real_done_loss_total
+            ) / self.real_backprop_count
         self.real_grid_loss_total = 0
         self.real_reward_loss_total = 0
         self.real_done_loss_total = 0
         self.real_backprop_count = 0
-        return real_grid_loss_mean.item(), real_reward_loss_mean.item(), real_done_loss_mean.item(), real_loss_mean.item()
+        return (
+            real_grid_loss_mean.item(),
+            real_reward_loss_mean.item(),
+            real_done_loss_mean.item(),
+            real_loss_mean.item(),
+        )
 
     # reset imag loss
     def imag_loss_reset(self):
         with torch.no_grad():
             imag_grid_loss_mean = self.imag_grid_loss_total / self.imag_backprop_count
-            imag_reward_loss_mean = self.imag_reward_loss_total / self.imag_backprop_count
+            imag_reward_loss_mean = (
+                self.imag_reward_loss_total / self.imag_backprop_count
+            )
             imag_done_loss_mean = self.imag_done_loss_total / self.imag_backprop_count
-            imag_loss_mean = (self.imag_grid_loss_total + self.reward_loss_weight*self.imag_reward_loss_total + self.done_loss_weight*self.imag_done_loss_total) / self.imag_backprop_count
+            imag_loss_mean = (
+                self.imag_grid_loss_total
+                + self.reward_loss_weight * self.imag_reward_loss_total
+                + self.done_loss_weight * self.imag_done_loss_total
+            ) / self.imag_backprop_count
         self.imag_grid_loss_total = 0
         self.imag_reward_loss_total = 0
         self.imag_done_loss_total = 0
         self.imag_backprop_count = 0
-        return imag_grid_loss_mean.item(), imag_reward_loss_mean.item(), imag_done_loss_mean.item(), imag_loss_mean.item()
+        return (
+            imag_grid_loss_mean.item(),
+            imag_reward_loss_mean.item(),
+            imag_done_loss_mean.item(),
+            imag_loss_mean.item(),
+        )

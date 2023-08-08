@@ -1,7 +1,7 @@
-'''
+"""
 Classes that follows a gym-like interface and implements stage two of the Messenger
 environment. Uses custom assignments of entity-dynamic-role.
-'''
+"""
 
 import random
 import json
@@ -67,124 +67,152 @@ ENTITY_KEYWORD_TABLE = {
 }
 
 VGDL_MOVEMENT_KEYWORD_TABLE = {
-    'fleeing': 'Fleeing',
-    'immobile': 'Immovable',
-    'chasing': 'Chaser',
+    "fleeing": "Fleeing",
+    "immobile": "Immovable",
+    "chasing": "Chaser",
 }
 
 MESSENGER_MOVEMENT_KEYWORD_TABLE = {
-    'fleeing': 'fleeing',
-    'immobile': 'immovable',
-    'chasing': 'chaser',
+    "fleeing": "fleeing",
+    "immobile": "immovable",
+    "chasing": "chaser",
 }
 
+
 class StageTwoCustom(MessengerEnv):
-    '''
+    """
     Full messenger environment with mobile sprites. Uses Py-VGDL as game engine.
     To avoid the need to instantiate a large number of games, (since there are
     P(12,3) = 1320 possible entity to role assignments) We apply a wrapper on top
     of the text and game state which masks the role archetypes (enemy, message goal)
     into entities (e.g. alien, knight, mage).
-    '''
+    """
 
     def __init__(self, shuffle_obs=True):
         super().__init__()
-        self.shuffle_obs = shuffle_obs # shuffle the entity layers
+        self.shuffle_obs = shuffle_obs  # shuffle the entity layers
         self.this_folder = Path(__file__).parent
 
-        with open(self.this_folder.joinpath("texts", "custom_text_splits", "custom_text_splits.json"), "r") as f:
+        with open(
+            self.this_folder.joinpath(
+                "texts", "custom_text_splits", "custom_text_splits.json"
+            ),
+            "r",
+        ) as f:
             self.custom_text_splits = json.load(f)
 
         self.init_states = [
-            str(path) for path in self.this_folder.joinpath("vgdl_files", "stage_2", "init_states").glob("*.txt")
+            str(path)
+            for path in self.this_folder.joinpath(
+                "vgdl_files", "stage_2", "init_states"
+            ).glob("*.txt")
         ]
 
         # entities tracked by VGDLEnv
-        self.notable_sprites = ["enemy", "message", "goal", "no_message", "with_message"]
-        self.env = None # the VGDLEnv
+        self.notable_sprites = [
+            "enemy",
+            "message",
+            "goal",
+            "no_message",
+            "with_message",
+        ]
+        self.env = None  # the VGDLEnv
 
     def _convert_obs(self, vgdl_obs):
-        '''
+        """
         Return a grid built from the vgdl observation which is a
         KeyValueObservation object (see vgdl code for details).
-        '''
+        """
         entity_locs = Grid(layers=3, shuffle=self.shuffle_obs)
         avatar_locs = Grid(layers=1)
 
         # try to add each entity one by one, if it's not there move on.
-        if 'enemy.1' in vgdl_obs:
-            entity_locs.add(self.game.enemy, Position(*vgdl_obs['enemy.1']['position']))
-        if 'message.1' in vgdl_obs:
-            entity_locs.add(self.game.message, Position(*vgdl_obs['message.1']['position']))
+        if "enemy.1" in vgdl_obs:
+            entity_locs.add(self.game.enemy, Position(*vgdl_obs["enemy.1"]["position"]))
+        if "message.1" in vgdl_obs:
+            entity_locs.add(
+                self.game.message, Position(*vgdl_obs["message.1"]["position"])
+            )
         else:
             # advance the entity counter, Oracle model requires special order.
             # TODO: maybe used named layers to make this more understandable.
             entity_locs.entity_count += 1
-        if 'goal.1' in vgdl_obs:
-            entity_locs.add(self.game.goal, Position(*vgdl_obs['goal.1']['position']))
+        if "goal.1" in vgdl_obs:
+            entity_locs.add(self.game.goal, Position(*vgdl_obs["goal.1"]["position"]))
 
-        if 'no_message.1' in vgdl_obs:
-            '''
+        if "no_message.1" in vgdl_obs:
+            """
             Due to a quirk in VGDL, the avatar is no_message if it starts as no_message
             even if the avatar may have acquired the message at a later point.
             To check, if it has a message, check that the class vector corresponding to
             with_message is == 1.
-            '''
-            avatar_pos = Position(*vgdl_obs['no_message.1']['position'])
+            """
+            avatar_pos = Position(*vgdl_obs["no_message.1"]["position"])
             # with_key is last position, see self.notable_sprites
-            if vgdl_obs['no_message.1']['class'][-1] == 1:
+            if vgdl_obs["no_message.1"]["class"][-1] == 1:
                 avatar = config.WITH_MESSAGE
             else:
                 avatar = config.NO_MESSAGE
 
         elif "with_message.1" in vgdl_obs:
             # this case only occurs if avatar begins as with_message at start of episode
-            avatar_pos = Position(*vgdl_obs['with_message.1']['position'])
+            avatar_pos = Position(*vgdl_obs["with_message.1"]["position"])
             avatar = config.WITH_MESSAGE
 
-        else: # the avatar is not in observation, so is probably dead
+        else:  # the avatar is not in observation, so is probably dead
             return {"entities": entity_locs.grid, "avatar": avatar_locs.grid}
 
-        avatar_locs.add(avatar, avatar_pos) # if not dead, add it.
+        avatar_locs.add(avatar, avatar_pos)  # if not dead, add it.
 
         return {"entities": entity_locs.grid, "avatar": avatar_locs.grid}
 
     def reset(self, split, entities, **kwargs):
-        '''
+        """
         Resets the current environment. NOTE: We remake the environment each time.
         This is a workaround to a bug in py-vgdl, where env.reset() does not
         properly reset the environment. kwargs go to get_document().
 
         split is one of the split keywords in custom splits
         entities is one of the games in a custom split
-        '''
+        """
 
         entities_by_role = {
-            'enemy': None,
-            'message': None,
-            'goal': None,
+            "enemy": None,
+            "message": None,
+            "goal": None,
         }
         for entity in entities:
             entities_by_role[entity[2]] = [entity[0], entity[1]]
         if None in entities_by_role.values():
             raise RuntimeError
-        self.game = get_game((ENTITY_KEYWORD_TABLE[entities_by_role['enemy'][0]], ENTITY_KEYWORD_TABLE[entities_by_role['message'][0]], ENTITY_KEYWORD_TABLE[entities_by_role['goal'][0]]))
+        self.game = get_game(
+            (
+                ENTITY_KEYWORD_TABLE[entities_by_role["enemy"][0]],
+                ENTITY_KEYWORD_TABLE[entities_by_role["message"][0]],
+                ENTITY_KEYWORD_TABLE[entities_by_role["goal"][0]],
+            )
+        )
 
-        game_file_path = self.this_folder.joinpath(f'custom_game_file_{os.getpid()}.txt')
-        with open(game_file_path, 'w') as f:
-            f.write(GAME_FILE_TEMPLATE % (
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['enemy'][1]],
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['message'][1]],
-                VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role['goal'][1]],
-            ))
+        game_file_path = self.this_folder.joinpath(
+            f"custom_game_file_{os.getpid()}.txt"
+        )
+        with open(game_file_path, "w") as f:
+            f.write(
+                GAME_FILE_TEMPLATE
+                % (
+                    VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role["enemy"][1]],
+                    VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role["message"][1]],
+                    VGDL_MOVEMENT_KEYWORD_TABLE[entities_by_role["goal"][1]],
+                )
+            )
 
         # args that will go into VGDL Env.
         self._envargs = {
-            'game_file': game_file_path,
-            'level_file': random.choice(self.init_states),
-            'notable_sprites': self.notable_sprites.copy(),
-            'obs_type': 'objects', # track the objects
-            'block_size': 34  # rendering block size
+            "game_file": game_file_path,
+            "level_file": random.choice(self.init_states),
+            "notable_sprites": self.notable_sprites.copy(),
+            "obs_type": "objects",  # track the objects
+            "block_size": 34,  # rendering block size
         }
         self.env = VGDLEnv(**self._envargs)
         vgdl_obs = self.env.reset()
@@ -194,7 +222,12 @@ class StageTwoCustom(MessengerEnv):
         except:
             pass
 
-        manual = [random.choice(self.custom_text_splits[entity[0]][entity[1]][entity[2]][split]) for entity in entities]
+        manual = [
+            random.choice(
+                self.custom_text_splits[entity[0]][entity[1]][entity[2]][split]
+            )
+            for entity in entities
+        ]
         ground_truth = [(entity[0], entity[1], entity[2]) for entity in entities]
 
         return self._convert_obs(vgdl_obs), manual, ground_truth
@@ -202,4 +235,3 @@ class StageTwoCustom(MessengerEnv):
     def step(self, action):
         vgdl_obs, reward, done, info = self.env.step(action)
         return self._convert_obs(vgdl_obs), reward, done, info
-

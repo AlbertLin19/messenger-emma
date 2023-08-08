@@ -1,4 +1,4 @@
-'''
+"""
 Collect rollouts of custom games of Stage 2 using a random policy and store into a pickle with the following format:
 {
     'texts': {
@@ -38,11 +38,11 @@ Collect rollouts of custom games of Stage 2 using a random policy and store into
         },
     }
 }
-'''
+"""
 
 import sys
 
-sys.path.append('../..')
+sys.path.append("../..")
 
 import gym
 import math
@@ -78,18 +78,21 @@ CUSTOM_TO_MESSENGER_ENTITY = {
     "sword": "sword",
 }
 
-INTENTIONS = ['random', 'survive', 'get_message', 'go_to_goal']
+INTENTIONS = ["random", "survive", "suicide", "get_message", "go_to_goal"]
 
 actions = [(0, -1, 0), (1, 1, 0), (2, 0, -1), (3, 0, 1), (4, 0, 0)]
 
+
 def get_avatar_id(obs):
     return obs[..., -1].max()
+
 
 def get_entity_id_by_role(parsed_manuals, role):
     for e in parsed_manuals:
         if e[2] == role:
             return ENTITY_IDS[CUSTOM_TO_MESSENGER_ENTITY[e[0]]]
     return None
+
 
 def get_position_by_id(obs, id):
     entity_ids = obs.reshape(100, -1).max(0).tolist()
@@ -99,11 +102,14 @@ def get_position_by_id(obs, id):
     col = pos % 10
     return row, col
 
+
 def out_of_bounds(x):
     return x[0] < 0 or x[0] >= 10 or x[1] < 0 or x[1] >= 10
 
+
 def get_distance(x, y):
     return abs(x[0] - y[0]) + abs(x[1] - y[1])
+
 
 def get_best_action_for_chasing(a_pos, t_pos):
     best_d = 1e9
@@ -118,6 +124,7 @@ def get_best_action_for_chasing(a_pos, t_pos):
             best_d = d
             best_a = a
     return best_a
+
 
 def get_best_action_for_surviving(a_pos, e_pos, g_pos):
     distance_to_enemy = get_distance(a_pos, e_pos)
@@ -146,17 +153,18 @@ def get_best_action_for_surviving(a_pos, e_pos, g_pos):
 
     return best_a
 
+
 def choose_action(obs, parsed_manuals, intention):
 
-    if intention == 'random':
+    if intention == "random":
         return random.choice(range(5))
 
-    if intention == 'survive':
+    if intention == "survive":
         avatar_id = get_avatar_id(obs)
         a_pos = get_position_by_id(obs, avatar_id)
-        enemy_id = get_entity_id_by_role(parsed_manuals, 'enemy')
+        enemy_id = get_entity_id_by_role(parsed_manuals, "enemy")
         e_pos = get_position_by_id(obs, enemy_id)
-        goal_id = get_entity_id_by_role(parsed_manuals, 'goal')
+        goal_id = get_entity_id_by_role(parsed_manuals, "goal")
         g_pos = get_position_by_id(obs, goal_id)
         # if messaged has been obtained, don't care about hitting goal
         if avatar_id == WITH_MESSAGE.id:
@@ -164,47 +172,55 @@ def choose_action(obs, parsed_manuals, intention):
         # choose action that takes avatar furthest from the enemy
         return get_best_action_for_surviving(a_pos, e_pos, g_pos)
 
-    if intention == 'get_message':
+    if intention == "suicide":
+        avatar_id = get_avatar_id(obs)
+        a_pos = get_position_by_id(obs, avatar_id)
+        enemy_id = get_entity_id_by_role(parsed_manuals, "enemy")
+        e_pos = get_position_by_id(obs, enemy_id)
+        return get_best_action_for_chasing(a_pos, e_pos)
+
+    if intention == "get_message":
         avatar_id = get_avatar_id(obs)
         # if message has been obtained, act randomly
         if avatar_id == WITH_MESSAGE.id:
-            return choose_action(obs, parsed_manuals, 'random')
+            return choose_action(obs, parsed_manuals, "random")
         a_pos = get_position_by_id(obs, avatar_id)
-        message_id = get_entity_id_by_role(parsed_manuals, 'message')
+        message_id = get_entity_id_by_role(parsed_manuals, "message")
         t_pos = get_position_by_id(obs, message_id)
         # choose action that takes avatar closest to the goal
         return get_best_action_for_chasing(a_pos, t_pos)
 
-    if intention == 'go_to_goal':
+    if intention == "go_to_goal":
         avatar_id = get_avatar_id(obs)
         a_pos = get_position_by_id(obs, avatar_id)
         # if message has been obtained, go to goal
         if avatar_id == WITH_MESSAGE.id:
-            goal_id = get_entity_id_by_role(parsed_manuals, 'goal')
+            goal_id = get_entity_id_by_role(parsed_manuals, "goal")
             t_pos = get_position_by_id(obs, goal_id)
         # else go to message
         else:
-            message_id = get_entity_id_by_role(parsed_manuals, 'message')
+            message_id = get_entity_id_by_role(parsed_manuals, "message")
             t_pos = get_position_by_id(obs, message_id)
         # choose action that takes avatar closest to the goal or message
         return get_best_action_for_chasing(a_pos, t_pos)
 
     return None
 
+
 def wrap_obs(obs, entity_order):
-    """ Convert obs format returned by gym env (dict) to a numpy array expected by model
-    """
-    obs['entities'] = obs['entities'][..., entity_order]
+    """Convert obs format returned by gym env (dict) to a numpy array expected by model"""
+    obs["entities"] = obs["entities"][..., entity_order]
     return np.concatenate((obs["entities"], obs["avatar"]), axis=-1)
+
 
 random.seed(23)
 np.random.seed(23)
 
-SAVE_PATH = "./dataset_shuffle_balanced_intentions_10k_train_500_eval.pickle"
+SAVE_PATH = "./dataset_all_intentions_50k_train.pickle"
 SPLITS_PATH = "./data_splits_final_with_test.json"
 TEXTS_PATH = "../../messenger/envs/texts/custom_text_splits/custom_text_splits.json"
 
-NUM_TRAIN = 10000
+NUM_TRAIN = 50000
 NUM_EVAL = 500
 
 
@@ -216,9 +232,9 @@ with open(SPLITS_PATH, "r") as f:
 with open(TEXTS_PATH, "r") as f:
     texts = json.load(f)
 keys = {
-    'entities': list(texts.keys()),
-    'dynamics': list(list(texts.values())[0].keys()),
-    'roles': list(list(list(texts.values())[0].values())[0].keys()),
+    "entities": list(texts.keys()),
+    "dynamics": list(list(texts.values())[0].keys()),
+    "roles": list(list(list(texts.values())[0].values())[0].keys()),
 }
 
 print(keys)
@@ -229,16 +245,14 @@ dataset = {
     "rollouts": {},
 }
 
-env = gym.make(f'msgr-custom-v2', shuffle_obs=False)
+env = gym.make(f"msgr-custom-v2", shuffle_obs=False)
 
-role_order = {
-    'enemy': 0,
-    'message': 1,
-    'goal': 2
-}
+role_order = {"enemy": 0, "message": 1, "goal": 2}
 
 for split, games in splits.items():
+
     print(split)
+
     manual_idxs = []
     ground_truth_idxs = []
     grid_sequences = []
@@ -248,14 +262,14 @@ for split, games in splits.items():
 
     count_rewards = defaultdict(int)
 
-    if 'train' in split:
+    if "train" in split:
         NUM_REPEATS = math.ceil(NUM_TRAIN / len(games))
     else:
-        NUM_REPEATS = math.ceil(NUM_EVAL / len(games))
+        #NUM_REPEATS = math.ceil(NUM_EVAL / len(games))
+        NUM_REPEATS = len(INTENTIONS)
 
     for i in tqdm(range(len(games))):
-        for _ in range(NUM_REPEATS):
-
+        for n in range(NUM_REPEATS):
             obs, manual, ground_truth = env.reset(split=split, entities=games[i])
 
             # permute observation channels in a consistent order across an episode
@@ -267,8 +281,20 @@ for split, games in splits.items():
 
             obs = wrap_obs(obs, entity_order)
 
-            manual_idx = [texts[ground_truth[j][0]][ground_truth[j][1]][ground_truth[j][2]][split].index(manual[j]) for j in range(len(manual))]
-            ground_truth_idx = [(keys['entities'].index(ground_truth[j][0]), keys['dynamics'].index(ground_truth[j][1]), keys['roles'].index(ground_truth[j][2])) for j in range(len(ground_truth))]
+            manual_idx = [
+                texts[ground_truth[j][0]][ground_truth[j][1]][ground_truth[j][2]][
+                    split
+                ].index(manual[j])
+                for j in range(len(manual))
+            ]
+            ground_truth_idx = [
+                (
+                    keys["entities"].index(ground_truth[j][0]),
+                    keys["dynamics"].index(ground_truth[j][1]),
+                    keys["roles"].index(ground_truth[j][2]),
+                )
+                for j in range(len(ground_truth))
+            ]
 
             manual_idxs.append(manual_idx)
             ground_truth_idxs.append(ground_truth_idx)
@@ -279,7 +305,13 @@ for split, games in splits.items():
             done_sequence = [False]
 
             # choose an intention for the episode
-            episode_intention = random.choice(INTENTIONS)
+            if "train" in split:
+                episode_intention = random.choice(INTENTIONS)
+            else:
+                episode_intention = INTENTIONS[n]
+            #print(episode_intention)
+            #print(obs.sum(-1))
+            #input()
             done = False
             step = 1
             while not done:
@@ -289,6 +321,10 @@ for split, games in splits.items():
                 action = choose_action(obs, ground_truth, episode_intention)
                 obs, reward, done, _ = env.step(action)
                 obs = wrap_obs(obs, entity_order)
+
+                #print(obs.sum(-1))
+                #input()
+
                 grid_sequence.append(obs)
                 action_sequence.append(action)
                 reward_sequence.append(reward)
@@ -312,6 +348,6 @@ for split, games in splits.items():
     }
 
 #print('DEBUG!!! uncomment saving')
-with open(SAVE_PATH, 'wb') as f:
+with open(SAVE_PATH, "wb") as f:
     pickle.dump(dataset, f)
-    print('SAVED')
+    print("SAVED")

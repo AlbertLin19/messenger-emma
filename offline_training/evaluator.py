@@ -6,47 +6,74 @@ import wandb
 from offline_training.batched_world_model.utils import batched_ground, ENTITY_IDS
 
 # colors for grid visualizations
-COLORS = torch.tensor([
-        [0, 0, 0], # 0 background
-        [255, 0, 0], # 1 dirt
-        [255, 85, 0], # 2 airplane
-        [255, 170, 0], # 3 mage
-        [255, 255, 0], # 4 dog
-        [170, 255, 0], # 5 bird
-        [85, 255, 0], # 6 fish
-        [0, 255, 0], # 7 scientist
-        [0, 255, 85], # 8 thief
-        [0, 255, 170], # 9 ship
-        [0, 255, 255], # 10 ball
-        [0, 170, 255], # 11 robot
-        [0, 85, 255], # 12 queen
-        [0, 0, 255], # 13 sword
-        [85, 0, 255], # 14 wall
-        [170, 0, 255], # 15 no_message
-        [255, 0, 255], # 16 with_message
-    ])
+COLORS = torch.tensor(
+    [
+        [0, 0, 0],  # 0 background
+        [255, 0, 0],  # 1 dirt
+        [255, 85, 0],  # 2 airplane
+        [255, 170, 0],  # 3 mage
+        [255, 255, 0],  # 4 dog
+        [170, 255, 0],  # 5 bird
+        [85, 255, 0],  # 6 fish
+        [0, 255, 0],  # 7 scientist
+        [0, 255, 85],  # 8 thief
+        [0, 255, 170],  # 9 ship
+        [0, 255, 255],  # 10 ball
+        [0, 170, 255],  # 11 robot
+        [0, 85, 255],  # 12 queen
+        [0, 0, 255],  # 13 sword
+        [85, 0, 255],  # 14 wall
+        [170, 0, 255],  # 15 no_message
+        [255, 0, 255],  # 16 with_message
+    ]
+)
+
 
 # evaluate model predictions across a battery of metrics
 class Evaluator:
-    def __init__(self, world_model, log_prefix, max_rollout_length, relevant_cls_idxs, n_frames, device):
+    def __init__(
+        self,
+        world_model,
+        log_prefix,
+        max_rollout_length,
+        relevant_cls_idxs,
+        n_frames,
+        device,
+    ):
         self.world_model = world_model
-        self.log_prefix = log_prefix # prefix for wandb log name
+        self.log_prefix = log_prefix  # prefix for wandb log name
         self.max_rollout_length = max_rollout_length
         self.relevant_cls_idxs = relevant_cls_idxs.cpu()
         self.n_frames = n_frames
         self.device = device
 
-        self.sprite_idxs = self.relevant_cls_idxs[((self.relevant_cls_idxs != 0)*(self.relevant_cls_idxs != 1)*(self.relevant_cls_idxs != 14)).argwhere().squeeze(-1)]
-        self.entity_idxs = self.sprite_idxs[((self.sprite_idxs != 15)*(self.sprite_idxs != 16)).argwhere().squeeze(-1)]
+        self.sprite_idxs = self.relevant_cls_idxs[
+            (
+                (self.relevant_cls_idxs != 0)
+                * (self.relevant_cls_idxs != 1)
+                * (self.relevant_cls_idxs != 14)
+            )
+            .argwhere()
+            .squeeze(-1)
+        ]
+        self.entity_idxs = self.sprite_idxs[
+            ((self.sprite_idxs != 15) * (self.sprite_idxs != 16)).argwhere().squeeze(-1)
+        ]
         self.sorted_entity_idxs = torch.sort(self.entity_idxs).values
 
         self.reset()
 
     # reset all metrics
     def reset(self):
-        self.tps = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
-        self.fns = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
-        self.fps = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.tps = torch.zeros(
+            (self.max_rollout_length, 17), dtype=int, device=self.device
+        )
+        self.fns = torch.zeros(
+            (self.max_rollout_length, 17), dtype=int, device=self.device
+        )
+        self.fps = torch.zeros(
+            (self.max_rollout_length, 17), dtype=int, device=self.device
+        )
 
         self.pred_probs_for_vid = []
         self.pred_multilabels_for_vid = []
@@ -57,12 +84,22 @@ class Evaluator:
         self.ground_truth = {idx.item(): None for idx in self.entity_idxs}
         self.token = {idx.item(): None for idx in self.entity_idxs}
 
-        self.game_grounding = torch.zeros((len(self.entity_idxs), len(self.entity_idxs)), device=self.device)
+        self.game_grounding = torch.zeros(
+            (len(self.entity_idxs), len(self.entity_idxs)), device=self.device
+        )
 
-        self.grid_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
-        self.grid_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
-        self.nontrivial_grid_ln_perplexities = torch.zeros((self.max_rollout_length, 17), device=self.device)
-        self.nontrivial_grid_ln_perplexity_counts = torch.zeros((self.max_rollout_length, 17), dtype=int, device=self.device)
+        self.grid_ln_perplexities = torch.zeros(
+            (self.max_rollout_length, 17), device=self.device
+        )
+        self.grid_ln_perplexity_counts = torch.zeros(
+            (self.max_rollout_length, 17), dtype=int, device=self.device
+        )
+        self.nontrivial_grid_ln_perplexities = torch.zeros(
+            (self.max_rollout_length, 17), device=self.device
+        )
+        self.nontrivial_grid_ln_perplexity_counts = torch.zeros(
+            (self.max_rollout_length, 17), dtype=int, device=self.device
+        )
 
         self.reward_mse = 0
         self.reward_count = 0
@@ -74,8 +111,15 @@ class Evaluator:
         self.nontrivial_done_count = 0
 
     # evaluate results from world_model
-    def push(self, results, descriptors_tuple, ground_truths, idxs_tuple, entity_ids, timesteps):
-        
+    def push(
+        self,
+        results,
+        descriptors_tuple,
+        ground_truths,
+        idxs_tuple,
+        entity_ids,
+        timesteps,
+    ):
         # unpack arguments
         preds, labels = results
         pred_locs, pred_rewards, pred_done_probs = preds
@@ -88,10 +132,24 @@ class Evaluator:
 
         with torch.no_grad():
             # evaluate true positives (tps), false negatives (fns), and false positives (fps) for ongoing trajectories
-            confusions = pred_multilabels / true_multilabels # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
-            self.tps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == 1, dim=(1, 2))[cur_idxs])
-            self.fns.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == 0, dim=(1, 2))[cur_idxs])
-            self.fps.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.sum(confusions == float('inf'), dim=(1, 2))[cur_idxs])
+            confusions = (
+                pred_multilabels / true_multilabels
+            )  # 1 -> tp, 0 -> fn, inf -> fp, nan -> tn
+            self.tps.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=torch.sum(confusions == 1, dim=(1, 2))[cur_idxs],
+            )
+            self.fns.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=torch.sum(confusions == 0, dim=(1, 2))[cur_idxs],
+            )
+            self.fps.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=torch.sum(confusions == float("inf"), dim=(1, 2))[cur_idxs],
+            )
 
             # store single frame from first rollout in batch (if ongoing) for each of the video types
             if (cur_idxs == 0).any():
@@ -133,41 +191,118 @@ class Evaluator:
                     break
 
                 for j in range(len(manuals[i])):
-                    idx = (self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][j][0]]).argwhere().squeeze()
+                    idx = (
+                        (self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][j][0]])
+                        .argwhere()
+                        .squeeze()
+                    )
 
                     if self.game_grounding[idx].sum() == 0:
-                        self.game_grounding[idx, torch.cat([(self.sorted_entity_idxs == ENTITY_IDS[ground_truths[i][k][0]]).argwhere().squeeze(0) for k in range(len(manuals[i]))])] = batched_ground(manuals[i].unsqueeze(0), [ground_truths[i]], self.world_model)[0, ENTITY_IDS[ground_truths[i][j][0]]]
+                        self.game_grounding[
+                            idx,
+                            torch.cat(
+                                [
+                                    (
+                                        self.sorted_entity_idxs
+                                        == ENTITY_IDS[ground_truths[i][k][0]]
+                                    )
+                                    .argwhere()
+                                    .squeeze(0)
+                                    for k in range(len(manuals[i]))
+                                ]
+                            ),
+                        ] = batched_ground(
+                            manuals[i].unsqueeze(0),
+                            [ground_truths[i]],
+                            self.world_model,
+                        )[
+                            0, ENTITY_IDS[ground_truths[i][j][0]]
+                        ]
 
                         missing = (self.game_grounding.sum(dim=-1) == 0).any()
                         if not missing:
                             break
 
             # accumulate grid_ln_perplexities
-            all_pred_probs = torch.cat((pred_probs.permute(0, 3, 1, 2).flatten(2, 3), pred_nonexistence_probs.unsqueeze(-1)), dim=-1) # B x 17 x 101
+            all_pred_probs = torch.cat(
+                (
+                    pred_probs.permute(0, 3, 1, 2).flatten(2, 3),
+                    pred_nonexistence_probs.unsqueeze(-1),
+                ),
+                dim=-1,
+            )  # B x 17 x 101
             all_pred_log_probs = torch.log(all_pred_probs)
-            true_nonexistence_probs = 1.0*(torch.sum(true_probs, dim=(1, 2)) <= 0)
-            all_true_probs = torch.cat((true_probs.permute(0, 3, 1, 2).flatten(2, 3), true_nonexistence_probs.unsqueeze(-1)), dim=-1)
-            self.grid_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
-            self.grid_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=torch.ones((len(cur_idxs), 17), dtype=int, device=self.device))
+            true_nonexistence_probs = 1.0 * (torch.sum(true_probs, dim=(1, 2)) <= 0)
+            all_true_probs = torch.cat(
+                (
+                    true_probs.permute(0, 3, 1, 2).flatten(2, 3),
+                    true_nonexistence_probs.unsqueeze(-1),
+                ),
+                dim=-1,
+            )
+            self.grid_ln_perplexities.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=-torch.sum((all_true_probs * all_pred_log_probs)[cur_idxs], dim=2),
+            )
+            self.grid_ln_perplexity_counts.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=torch.ones((len(cur_idxs), 17), dtype=int, device=self.device),
+            )
 
             # accumulate nontrivial_grid_ln_perplexities
             # using entity_ids: B x 3 array, where each row holds the 3 entity ids of a game
-            entity_masks = torch.sum(F.one_hot(entity_ids, num_classes=17), dim=1) # B x 17
-            entity_masks[:, 15:17] = 1 # avatar with/without message is always possible in a game
-            self.nontrivial_grid_ln_perplexities.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=-torch.sum((entity_masks.unsqueeze(-1)*all_true_probs*all_pred_log_probs)[cur_idxs], dim=2))
-            self.nontrivial_grid_ln_perplexity_counts.scatter_add_(dim=0, index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17), src=entity_masks[cur_idxs])
+            entity_masks = torch.sum(
+                F.one_hot(entity_ids, num_classes=17), dim=1
+            )  # B x 17
+            entity_masks[
+                :, 15:17
+            ] = 1  # avatar with/without message is always possible in a game
+            self.nontrivial_grid_ln_perplexities.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=-torch.sum(
+                    (entity_masks.unsqueeze(-1) * all_true_probs * all_pred_log_probs)[
+                        cur_idxs
+                    ],
+                    dim=2,
+                ),
+            )
+            self.nontrivial_grid_ln_perplexity_counts.scatter_add_(
+                dim=0,
+                index=timesteps[cur_idxs].unsqueeze(-1).expand(-1, 17),
+                src=entity_masks[cur_idxs],
+            )
 
             # accumulate reward_mse and nontrivial_reward_mse
-            self.reward_mse += torch.sum(torch.pow((pred_rewards - true_rewards)[cur_idxs], 2)).item()
+            self.reward_mse += torch.sum(
+                torch.pow((pred_rewards - true_rewards)[cur_idxs], 2)
+            ).item()
             self.reward_count += len(cur_idxs)
-            self.nontrivial_reward_mse += torch.sum(torch.pow(((pred_rewards - true_rewards)*(true_rewards != 0))[cur_idxs], 2)).item()
-            self.nontrivial_reward_count += torch.sum((true_rewards != 0)[cur_idxs]).item()
-            
+            self.nontrivial_reward_mse += torch.sum(
+                torch.pow(
+                    ((pred_rewards - true_rewards) * (true_rewards != 0))[cur_idxs], 2
+                )
+            ).item()
+            self.nontrivial_reward_count += torch.sum(
+                (true_rewards != 0)[cur_idxs]
+            ).item()
+
             # accumulate done_ln_perplexity and nontrivial_done_ln_perplexity
-            self.done_ln_perplexity += F.binary_cross_entropy(pred_done_probs[cur_idxs], true_done_probs[cur_idxs], reduction='sum').item()
+            self.done_ln_perplexity += F.binary_cross_entropy(
+                pred_done_probs[cur_idxs], true_done_probs[cur_idxs], reduction="sum"
+            ).item()
             self.done_count += len(cur_idxs)
-            self.nontrivial_done_ln_perplexity += F.binary_cross_entropy(pred_done_probs[cur_idxs], true_done_probs[cur_idxs], weight=(true_rewards != 0)[cur_idxs], reduction='sum').item()
-            self.nontrivial_done_count += torch.sum((true_rewards != 0)[cur_idxs]).item()
+            self.nontrivial_done_ln_perplexity += F.binary_cross_entropy(
+                pred_done_probs[cur_idxs],
+                true_done_probs[cur_idxs],
+                weight=(true_rewards != 0)[cur_idxs],
+                reduction="sum",
+            ).item()
+            self.nontrivial_done_count += torch.sum(
+                (true_rewards != 0)[cur_idxs]
+            ).item()
 
     def getLog(self, step):
         log = {}
@@ -183,7 +318,7 @@ class Evaluator:
             #     recall = recalls[:, idxs].nanmean(dim=-1)
             #     precision = precisions[:, idxs].nanmean(dim=-1)
             #     f1 = f1s[:, idxs].nanmean(dim=-1)
-                        
+
             #     timestep = np.arange(self.max_rollout_length)
             #     log.update({
             #         # f'recall_{log_suffix}': wandb.plot.line(wandb.Table(data=np.stack((timestep, recall.cpu().numpy()), axis=-1), columns=['timestep', 'recall']), 'timestep', 'recall', title=f'{log_suffix}: Recall versus Timestep'),
@@ -204,65 +339,243 @@ class Evaluator:
             # logCurves('avatar', [15, 16])
 
             # log visualizations of predictions
-            true_probs = F.pad(torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
-            pred_probs = F.pad(torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
+            true_probs = F.pad(
+                torch.stack(self.true_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1)
+            )
+            pred_probs = F.pad(
+                torch.stack(self.pred_probs_for_vid, dim=0), (0, 0, 1, 1, 1, 1)
+            )
             probs = torch.cat((true_probs, pred_probs), dim=2)
-            log.update({f'prob_{i}': wandb.Video((255*probs[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
-            log.update({'probs': wandb.Video(torch.sum((probs.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2).permute(0, 3, 1, 2).to(torch.uint8))})
+            log.update(
+                {
+                    f"prob_{i}": wandb.Video(
+                        (255 * probs[..., i : i + 1])
+                        .permute(0, 3, 1, 2)
+                        .to(torch.uint8)
+                    )
+                    for i in self.relevant_cls_idxs
+                }
+            )
+            log.update(
+                {
+                    "probs": wandb.Video(
+                        torch.sum(
+                            (probs.unsqueeze(-1) * COLORS)[
+                                ..., self.relevant_cls_idxs, :
+                            ],
+                            dim=-2,
+                        )
+                        .permute(0, 3, 1, 2)
+                        .to(torch.uint8)
+                    )
+                }
+            )
 
-            true_multilabels = F.pad(torch.stack(self.true_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
-            pred_multilabels = F.pad(torch.stack(self.pred_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1))
+            true_multilabels = F.pad(
+                torch.stack(self.true_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1)
+            )
+            pred_multilabels = F.pad(
+                torch.stack(self.pred_multilabels_for_vid, dim=0), (0, 0, 1, 1, 1, 1)
+            )
             multilabels = torch.cat((true_multilabels, pred_multilabels), dim=2)
-            log.update({f'multilabel_{i}': wandb.Video((255*multilabels[..., i:i+1]).permute(0, 3, 1, 2).to(torch.uint8)) for i in self.relevant_cls_idxs})
-            log.update({'multilabels': wandb.Video(torch.min(torch.sum((multilabels.unsqueeze(-1)*COLORS)[..., self.relevant_cls_idxs, :], dim=-2), torch.tensor([255])).permute(0, 3, 1, 2).to(torch.uint8))})
+            log.update(
+                {
+                    f"multilabel_{i}": wandb.Video(
+                        (255 * multilabels[..., i : i + 1])
+                        .permute(0, 3, 1, 2)
+                        .to(torch.uint8)
+                    )
+                    for i in self.relevant_cls_idxs
+                }
+            )
+            log.update(
+                {
+                    "multilabels": wandb.Video(
+                        torch.min(
+                            torch.sum(
+                                (multilabels.unsqueeze(-1) * COLORS)[
+                                    ..., self.relevant_cls_idxs, :
+                                ],
+                                dim=-2,
+                            ),
+                            torch.tensor([255]),
+                        )
+                        .permute(0, 3, 1, 2)
+                        .to(torch.uint8)
+                    )
+                }
+            )
 
             # evaluate and log grounding and token attention table
             if not (None in self.manual.values()):
-                manual = torch.stack([self.manual[idx.item()] for idx in self.sorted_entity_idxs], dim=0)
-                ground_truth = [self.ground_truth[idx.item()] for idx in self.sorted_entity_idxs]
+                manual = torch.stack(
+                    [self.manual[idx.item()] for idx in self.sorted_entity_idxs], dim=0
+                )
+                ground_truth = [
+                    self.ground_truth[idx.item()] for idx in self.sorted_entity_idxs
+                ]
                 token = [self.token[idx.item()] for idx in self.sorted_entity_idxs]
 
-                grounding = batched_ground(manual.unsqueeze(0), [ground_truth], self.world_model)[0, self.sorted_entity_idxs].cpu()
-                log.update({'grounding': wandb.Image(grounding.unsqueeze(0))})
+                grounding = batched_ground(
+                    manual.unsqueeze(0), [ground_truth], self.world_model
+                )[0, self.sorted_entity_idxs].cpu()
+                log.update({"grounding": wandb.Image(grounding.unsqueeze(0))})
 
-                if ('emma' in self.world_model.key_type) or ('emma' in self.world_model.val_type):
+                if ("emma" in self.world_model.key_type) or (
+                    "emma" in self.world_model.val_type
+                ):
                     token = np.asarray(token)
-                    columns = [step*np.ones(token.size), token.flatten()]
-                    column_names = ['step', 'token']
-                    if 'emma' in self.world_model.key_type:
-                        key_attention = self.world_model.scale_key(manual).squeeze(-1).cpu()
+                    columns = [step * np.ones(token.size), token.flatten()]
+                    column_names = ["step", "token"]
+                    if "emma" in self.world_model.key_type:
+                        key_attention = (
+                            self.world_model.scale_key(manual).squeeze(-1).cpu()
+                        )
                         columns.append(key_attention.numpy().flatten())
-                        column_names.append('key')
-                    if 'emma' in self.world_model.val_type:
-                        value_attention = self.world_model.scale_val(manual).squeeze(-1).cpu()
+                        column_names.append("key")
+                    if "emma" in self.world_model.val_type:
+                        value_attention = (
+                            self.world_model.scale_val(manual).squeeze(-1).cpu()
+                        )
                         columns.append(value_attention.numpy().flatten())
-                        column_names.append('value')
-                    log.update({'token_attention': wandb.Table(columns=column_names, data=np.stack(columns, axis=-1))})
+                        column_names.append("value")
+                    log.update(
+                        {
+                            "token_attention": wandb.Table(
+                                columns=column_names, data=np.stack(columns, axis=-1)
+                            )
+                        }
+                    )
 
             # evaluate and log game_grounding as an alternative
             if not (self.game_grounding.sum(dim=-1) == 0).any():
-                log.update({'game_grounding': wandb.Image(self.game_grounding.cpu().unsqueeze(0))})
+                log.update(
+                    {
+                        "game_grounding": wandb.Image(
+                            self.game_grounding.cpu().unsqueeze(0)
+                        )
+                    }
+                )
 
             # log grid_perplexities
-            log.update({'grid_perplexity': np.exp((self.grid_ln_perplexities[:, self.relevant_cls_idxs].sum() / self.grid_ln_perplexity_counts[:, self.relevant_cls_idxs].sum()).cpu().numpy())})
-            log.update({'nontrivial_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities[:, self.relevant_cls_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[:, self.relevant_cls_idxs].sum()).cpu().numpy())})
-            log.update({f'nontrivial_grid_perplexity_t={i}': np.exp((self.nontrivial_grid_ln_perplexities[i, self.relevant_cls_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[i, self.relevant_cls_idxs].sum()).cpu().numpy()) for i in range(1, self.max_rollout_length)})
-            log.update({'entity_grid_perplexity': np.exp((self.grid_ln_perplexities[:, self.entity_idxs].sum() / self.grid_ln_perplexity_counts[:, self.entity_idxs].sum()).cpu().numpy())})
-            log.update({'nontrivial_entity_grid_perplexity': np.exp((self.nontrivial_grid_ln_perplexities[:, self.entity_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[:, self.entity_idxs].sum()).cpu().numpy())})
-            log.update({f'nontrivial_entity_grid_perplexity_t={i}': np.exp((self.nontrivial_grid_ln_perplexities[i, self.entity_idxs].sum() / self.nontrivial_grid_ln_perplexity_counts[i, self.entity_idxs].sum()).cpu().numpy()) for i in range(1, self.max_rollout_length)})
+            log.update(
+                {
+                    "grid_perplexity": np.exp(
+                        (
+                            self.grid_ln_perplexities[:, self.relevant_cls_idxs].sum()
+                            / self.grid_ln_perplexity_counts[
+                                :, self.relevant_cls_idxs
+                            ].sum()
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                }
+            )
+            log.update(
+                {
+                    "nontrivial_grid_perplexity": np.exp(
+                        (
+                            self.nontrivial_grid_ln_perplexities[
+                                :, self.relevant_cls_idxs
+                            ].sum()
+                            / self.nontrivial_grid_ln_perplexity_counts[
+                                :, self.relevant_cls_idxs
+                            ].sum()
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                }
+            )
+            log.update(
+                {
+                    f"nontrivial_grid_perplexity_t={i}": np.exp(
+                        (
+                            self.nontrivial_grid_ln_perplexities[
+                                i, self.relevant_cls_idxs
+                            ].sum()
+                            / self.nontrivial_grid_ln_perplexity_counts[
+                                i, self.relevant_cls_idxs
+                            ].sum()
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                    for i in range(1, self.max_rollout_length)
+                }
+            )
+            log.update(
+                {
+                    "entity_grid_perplexity": np.exp(
+                        (
+                            self.grid_ln_perplexities[:, self.entity_idxs].sum()
+                            / self.grid_ln_perplexity_counts[:, self.entity_idxs].sum()
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                }
+            )
+            log.update(
+                {
+                    "nontrivial_entity_grid_perplexity": np.exp(
+                        (
+                            self.nontrivial_grid_ln_perplexities[
+                                :, self.entity_idxs
+                            ].sum()
+                            / self.nontrivial_grid_ln_perplexity_counts[
+                                :, self.entity_idxs
+                            ].sum()
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                }
+            )
+            log.update(
+                {
+                    f"nontrivial_entity_grid_perplexity_t={i}": np.exp(
+                        (
+                            self.nontrivial_grid_ln_perplexities[
+                                i, self.entity_idxs
+                            ].sum()
+                            / self.nontrivial_grid_ln_perplexity_counts[
+                                i, self.entity_idxs
+                            ].sum()
+                        )
+                        .cpu()
+                        .numpy()
+                    )
+                    for i in range(1, self.max_rollout_length)
+                }
+            )
             # grid_perplexities = np.exp((self.grid_ln_perplexities / self.grid_ln_perplexity_counts).cpu().numpy())
             # nontrivial_grid_perplexities = np.exp((self.nontrivial_grid_ln_perplexities / self.nontrivial_grid_ln_perplexity_counts).cpu().numpy())
             # log.update({f'grid_perplexity_{j}_t={i}': grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
             # log.update({f'nontrivial_grid_perplexity_{j}_t={i}': nontrivial_grid_perplexities[i, j] for i in range(self.max_rollout_length) for j in self.relevant_cls_idxs})
 
             # log reward_mse
-            log.update({f'reward_mse': self.reward_mse / self.reward_count})
-            log.update({f'nontrivial_reward_mse': self.nontrivial_reward_mse / self.nontrivial_reward_count})
+            log.update({f"reward_mse": self.reward_mse / self.reward_count})
+            log.update(
+                {
+                    f"nontrivial_reward_mse": self.nontrivial_reward_mse
+                    / self.nontrivial_reward_count
+                }
+            )
 
             # log done_perplexity
-            log.update({f'done_perplexity': np.exp(self.done_ln_perplexity / self.done_count)})
-            log.update({f'nontrivial_done_perplexity': np.exp(self.nontrivial_done_ln_perplexity / self.nontrivial_done_count)})
-                        
+            log.update(
+                {f"done_perplexity": np.exp(self.done_ln_perplexity / self.done_count)}
+            )
+            log.update(
+                {
+                    f"nontrivial_done_perplexity": np.exp(
+                        self.nontrivial_done_ln_perplexity / self.nontrivial_done_count
+                    )
+                }
+            )
+
         for key in list(log.keys()):
             log[self.log_prefix + key] = log.pop(key)
         return log

@@ -7,14 +7,12 @@ setuptools.setup(
     author_email="hjwang@cs.princeton.edu",
     description="Implements EMMA model and Messenger environments.",
     packages=setuptools.find_packages(),
-    python_requires='>=3.6',
+    python_requires=">=3.6",
     install_requires=[
-        'gym',
-        'numpy',
-        'vgdl @ git+https://github.com/ahjwang/py-vgdl',
-        'pygame>=1.9.6'
+        "gym",
+        "numpy",
+        "vgdl @ git+https://github.com/ahjwang/py-vgdl",
+        "pygame>=1.9.6",
     ],
-    extras_require={
-        'models': ['torch>=1.3', 'transformers>=4.2']
-    }
+    extras_require={"models": ["torch>=1.3", "transformers>=4.2"]},
 )

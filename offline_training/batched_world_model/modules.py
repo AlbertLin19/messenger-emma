@@ -1,13 +1,25 @@
 import torch.nn as nn
 
+
 class BatchedEncoder(nn.Module):
     def __init__(self, channel_size, latent_size):
         super().__init__()
 
         self.network = nn.Sequential(
-            nn.Conv2d(in_channels=channel_size, out_channels=latent_size, kernel_size=3, stride=2, padding=2),
+            nn.Conv2d(
+                in_channels=channel_size,
+                out_channels=latent_size,
+                kernel_size=3,
+                stride=2,
+                padding=2,
+            ),
             nn.ReLU(),
-            nn.Conv2d(in_channels=latent_size, out_channels=latent_size, kernel_size=6, stride=1),
+            nn.Conv2d(
+                in_channels=latent_size,
+                out_channels=latent_size,
+                kernel_size=6,
+                stride=1,
+            ),
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(in_features=latent_size, out_features=latent_size),
@@ -15,6 +27,7 @@ class BatchedEncoder(nn.Module):
 
     def forward(self, x):
         return self.network(x)
+
 
 class BatchedDecoder(nn.Module):
     def __init__(self, channel_size, latent_size):
@@ -24,9 +37,19 @@ class BatchedDecoder(nn.Module):
             nn.Linear(in_features=latent_size, out_features=latent_size),
             nn.ReLU(),
             nn.Unflatten(dim=-1, unflattened_size=(-1, 1, 1)),
-            nn.ConvTranspose2d(in_channels=latent_size, out_channels=latent_size, kernel_size=4, stride=1),
+            nn.ConvTranspose2d(
+                in_channels=latent_size,
+                out_channels=latent_size,
+                kernel_size=4,
+                stride=1,
+            ),
             nn.ReLU(),
-            nn.ConvTranspose2d(in_channels=latent_size, out_channels=channel_size, kernel_size=4, stride=2),
+            nn.ConvTranspose2d(
+                in_channels=latent_size,
+                out_channels=channel_size,
+                kernel_size=4,
+                stride=2,
+            ),
         )
 
     def forward(self, x):
@@ -34,7 +57,6 @@ class BatchedDecoder(nn.Module):
 
 
 class MyGroupNorm(nn.Module):
-
     # num_channels: num_groups
     GROUP_NORM_LOOKUP = {
         16: 2,  # -> channels per group: 8
@@ -51,14 +73,18 @@ class MyGroupNorm(nn.Module):
 
     def __init__(self, num_channels):
         super(MyGroupNorm, self).__init__()
-        self.norm = nn.GroupNorm(num_groups=self.GROUP_NORM_LOOKUP[num_channels],
-                                 num_channels=num_channels)
+        self.norm = nn.GroupNorm(
+            num_groups=self.GROUP_NORM_LOOKUP[num_channels], num_channels=num_channels
+        )
 
     def forward(self, x):
         x = self.norm(x)
         return x
 
-def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, padding: int = 1) -> nn.Conv2d:
+
+def conv3x3(
+    in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, padding: int = 1
+) -> nn.Conv2d:
     """3x3 convolution with padding"""
     return nn.Conv2d(
         in_planes,
@@ -70,9 +96,11 @@ def conv3x3(in_planes: int, out_planes: int, stride: int = 1, groups: int = 1, p
         bias=False,
     )
 
+
 def conv1x1(in_planes: int, out_planes: int, stride: int = 1) -> nn.Conv2d:
     """1x1 convolution"""
     return nn.Conv2d(in_planes, out_planes, kernel_size=1)
+
 
 # from https://github.com/pytorch/vision/blob/main/torchvision/models/resnet.py#L2
 class BasicBlock(nn.Module):
@@ -124,30 +152,29 @@ class BasicBlock(nn.Module):
 
         return out
 
+
 conv_params = {
-    'kernel': [3, 3, 3],
-    'stride': [1, 2, 2],
-    'padding': [2, 1, 1],
-    'in_channels' : [-1, 64, 64],
-    'hidden_channels' : [64, 64, 64],
-    'out_channels' : [64, 64, 64],
+    "kernel": [3, 3, 3],
+    "stride": [1, 2, 2],
+    "padding": [2, 1, 1],
+    "in_channels": [-1, 64, 64],
+    "hidden_channels": [64, 64, 64],
+    "out_channels": [64, 64, 64],
 }
 
+
 class ResNetEncoder(nn.Module):
-
     def __init__(self, in_dim):
-
         super().__init__()
 
-        F = conv_params['kernel'][:]
-        S = conv_params['stride'][:]
-        P = conv_params['padding'][:]
-        in_channels = conv_params['in_channels'][:]
-        out_channels = conv_params['out_channels'][:]
-        hidden_channels = conv_params['hidden_channels'][:]
+        F = conv_params["kernel"][:]
+        S = conv_params["stride"][:]
+        P = conv_params["padding"][:]
+        in_channels = conv_params["in_channels"][:]
+        out_channels = conv_params["out_channels"][:]
+        hidden_channels = conv_params["hidden_channels"][:]
 
         in_channels[0] = in_dim
-
 
         encoder_layers = [
             nn.Sequential(
@@ -164,8 +191,8 @@ class ResNetEncoder(nn.Module):
                     planes=out_channels[i],
                     padding=1,
                     norm_layer=MyGroupNorm,
-                    downsample=nn.Conv2d(hidden_channels[i], out_channels[i], 1)
-                )
+                    downsample=nn.Conv2d(hidden_channels[i], out_channels[i], 1),
+                ),
             )
             for i in range(len(in_channels))
         ]
@@ -178,17 +205,15 @@ class ResNetEncoder(nn.Module):
 
 
 class ResNetDecoder(nn.Module):
-
     def __init__(self, in_dim, out_dim=None):
-
         super().__init__()
 
-        F = conv_params['kernel'][:]
-        S = conv_params['stride'][:]
-        P = conv_params['padding'][:]
-        in_channels = conv_params['in_channels'][:]
-        out_channels = conv_params['out_channels'][:]
-        hidden_channels = conv_params['hidden_channels'][:]
+        F = conv_params["kernel"][:]
+        S = conv_params["stride"][:]
+        P = conv_params["padding"][:]
+        in_channels = conv_params["in_channels"][:]
+        out_channels = conv_params["out_channels"][:]
+        hidden_channels = conv_params["hidden_channels"][:]
 
         in_channels[0] = in_dim
 
@@ -200,7 +225,7 @@ class ResNetDecoder(nn.Module):
                     kernel_size=F[i],
                     stride=S[i],
                     padding=P[i],
-                    output_padding=1 if S[i] > 1 else 0
+                    output_padding=1 if S[i] > 1 else 0,
                 ),
                 nn.ReLU(),
                 BasicBlock(
@@ -208,25 +233,23 @@ class ResNetDecoder(nn.Module):
                     planes=in_channels[i],
                     padding=1,
                     norm_layer=MyGroupNorm,
-                    downsample=nn.Conv2d(hidden_channels[i], in_channels[i], 1)
-                )
+                    downsample=nn.Conv2d(hidden_channels[i], in_channels[i], 1),
+                ),
             )
             for i in reversed(range(len(in_channels)))
         ]
 
         if out_dim is not None:
-            decoder_layers.extend([
+            decoder_layers.extend(
+                [
                     nn.ReLU(),
                     nn.Conv2d(
-                        in_channels=in_channels[0],
-                        out_channels=out_dim,
-                        kernel_size=1
-                    )
+                        in_channels=in_channels[0], out_channels=out_dim, kernel_size=1
+                    ),
                 ]
             )
 
         self.model = nn.Sequential(*decoder_layers)
-
 
     def forward(self, in_data):
         return self.model(in_data)

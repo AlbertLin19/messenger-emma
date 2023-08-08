@@ -1,5 +1,5 @@
-import json 
-import pickle 
+import json
+import pickle
 from tqdm import tqdm
 
 SAVE_PATH = "./dataset.pickle"
@@ -9,7 +9,7 @@ GAME_REPEATS = 32
 with open(SPLITS_PATH, "r") as f:
     splits = json.load(f)
 
-with open(SAVE_PATH, 'rb') as f:
+with open(SAVE_PATH, "rb") as f:
     dataset = pickle.load(f)
 
 keys = dataset["keys"]
@@ -23,7 +23,7 @@ for split, games in splits.items():
             match = True
             for i in range(len(game)):
                 if game[i][0] != keys["entities"][ground_truth_idx[i][0]]:
-                    match = False 
+                    match = False
                     break
                 if game[i][1] != keys["dynamics"][ground_truth_idx[i][1]]:
                     match = False
