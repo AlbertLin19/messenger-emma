@@ -193,6 +193,9 @@ def train(args):
             if args.use_wandb:
                 wandb.log(wandb_stats)
 
+            stats_file = os.path.join(args.output, "stats.json")
+            with open(stats_file, "w") as f:
+                json.dump(wandb_stats, f, indent=2)
 
         if args.eval_mode:
             break
@@ -439,24 +442,23 @@ def add_eval_metrics(metrics, preds, targets, timesteps):
     )
 
     for i, t in enumerate(timesteps):
-        if t <= 10:
-            metrics["loc_loss_len_%d" % t].extend(
+        metrics["loc_loss_len_%d" % t].extend(
+            F.cross_entropy(
+                (preds["loc"][i] + 1e-6).log(), targets["loc"][i], reduction="none"
+            )
+            .view(-1)
+            .tolist()
+        )
+        for tt in range(1, t + 1):
+            metrics["loc_loss_len_upto_%d" % t].extend(
                 F.cross_entropy(
-                    (preds["loc"][i] + 1e-6).log(), targets["loc"][i], reduction="none"
+                    (preds["loc"][i] + 1e-6).log(),
+                    targets["loc"][i],
+                    reduction="none",
                 )
                 .view(-1)
                 .tolist()
             )
-            for tt in range(1, t + 1):
-                metrics["loc_loss_len_upto_%d" % t].extend(
-                    F.cross_entropy(
-                        (preds["loc"][i] + 1e-6).log(),
-                        targets["loc"][i],
-                        reduction="none",
-                    )
-                    .view(-1)
-                    .tolist()
-                )
 
     metrics["id_loss"].extend(
         F.cross_entropy(
@@ -470,8 +472,18 @@ def add_eval_metrics(metrics, preds, targets, timesteps):
     )
 
     for i, t in enumerate(timesteps):
-        if t <= 10:
-            metrics["id_loss_len_%d" % t].extend(
+        metrics["id_loss_len_%d" % t].extend(
+            F.cross_entropy(
+                (preds["id"][i] + 1e-6).log(),
+                targets["id"][i],
+                ignore_index=-1,
+                reduction="none",
+            )
+            .view(-1)
+            .tolist()
+        )
+        for tt in range(1, t + 1):
+            metrics["id_loss_len_upto_%d" % t].extend(
                 F.cross_entropy(
                     (preds["id"][i] + 1e-6).log(),
                     targets["id"][i],
@@ -481,17 +493,6 @@ def add_eval_metrics(metrics, preds, targets, timesteps):
                 .view(-1)
                 .tolist()
             )
-            for tt in range(1, t + 1):
-                metrics["id_loss_len_upto_%d" % t].extend(
-                    F.cross_entropy(
-                        (preds["id"][i] + 1e-6).log(),
-                        targets["id"][i],
-                        ignore_index=-1,
-                        reduction="none",
-                    )
-                    .view(-1)
-                    .tolist()
-                )
 
     metrics["reward_loss"].extend(
         F.cross_entropy(preds["reward"], targets["reward"], reduction="none")
